@@ -1,0 +1,13 @@
+{
+  "tool": "needlenose",
+  "mask_png": "assets/presets/needlenose_mask.png",
+  "rect_png": "assets/presets/needlenose_rect.png",
+  "region_mm": [14,56,201,226],
+  "origin_mm": [14,56],
+  "px_per_mm": 8.0,
+  "size_px": [1496,1360],
+  "foreground_px": 196443,
+  "largest_contour_area_px": 194510.0,
+  "bbox_px": [185,173,1137,993],
+  "min_area_rect_px": {"centre":[708.7208,620.5573],"size":[447.9503,1356.0502],"angle_deg":-50.5468}
+}

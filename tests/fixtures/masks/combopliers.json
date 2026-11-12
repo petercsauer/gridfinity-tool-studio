@@ -1,0 +1,13 @@
+{
+  "tool": "combopliers",
+  "mask_png": "assets/presets/combopliers_mask.png",
+  "rect_png": "assets/presets/combopliers_rect.png",
+  "region_mm": [14,56,201,226],
+  "origin_mm": [14,56],
+  "px_per_mm": 8.0,
+  "size_px": [1496,1360],
+  "foreground_px": 284636,
+  "largest_contour_area_px": 282470.5,
+  "bbox_px": [213,179,1197,1175],
+  "min_area_rect_px": {"centre":[760.3975,718.9272],"size":[452.3832,1491.2999],"angle_deg":-47.0214}
+}

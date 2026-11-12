@@ -1,13 +1,33 @@
 """Watertight gridfinity bin with a tool pocket, built with manifold3d."""
 import math
+from dataclasses import dataclass
 
 import numpy as np
 import trimesh
 from manifold3d import CrossSection, FillRule, JoinType, Manifold
 from shapely.geometry import Polygon
 
-from .constants import GAP, GRID, PAD_BOTH, PAD_MID, PAD_TOP, R_BOT, R_MID, R_TOP, UHT
+from .constants import FLOOR_MIN, GAP, GRID, PAD_BOTH, PAD_MID, PAD_TOP, R_BOT, R_MID, R_TOP, RECESS, UHT
 from .geometry import ccw
+
+
+SIMPLIFY_TOL = 1e-3                                      # mm
+
+
+@dataclass(frozen=True)
+class GenbinResult:
+    """A generated bin: the mesh, the pocket depth actually cut (``effective_depth``, which is
+    less than requested when the bin is too low) and the footprint in cells."""
+    mesh: trimesh.Trimesh
+    effective_depth: float
+    nx: int
+    ny: int
+
+
+def max_depth(u):
+    """Deepest pocket a ``u``-unit bin can hold, measured from the pocket opening
+    (``u*7 - 4.4 - 5.55``; 0 for a 1-unit bin, whose lip trough reaches below the floor)."""
+    return max(0.0, u*UHT - RECESS - FLOOR_MIN)
 
 
 def _rr(w, h, r):
@@ -34,12 +54,12 @@ def _foot():
 def genbin(pocket_mm, nx, ny, u, depth, fillet, bfillet=0.0):
     """Build an nx x ny cell, u-unit-high bin with ``pocket_mm`` (centred, mm) cut ``depth`` mm deep
     below the stacking-lip recess, with a top round-over ``fillet`` and bottom round ``bfillet``.
-    Returns a trimesh.Trimesh."""
+    The depth is limited to ``max_depth(u)``. Returns a ``GenbinResult``."""
     top = u*UHT
     Dx = GRID*nx-GAP
     Dy = GRID*ny-GAP
-    recessZ = top - 4.4                                  # pocket opens at the recess floor
-    floorTop = max(4.75+0.8, recessZ - depth)            # depth = pocket depth from the opening
+    recessZ = top - RECESS                               # pocket opens at the recess floor
+    floorTop = max(FLOOR_MIN, recessZ - depth)           # depth = pocket depth from the opening
     feet = Manifold()
     for i in range(nx):
         for j in range(ny):
@@ -83,6 +103,9 @@ def genbin(pocket_mm, nx, ny, u, depth, fillet, bfillet=0.0):
             d = i/steps*fb
             inset = fb - math.sqrt(max(0.0, fb*fb-(fb-d)**2))
             addring(poly.buffer(-inset, join_style=1, quad_segs=24), floorTop+i/steps*fb-0.01, floorTop+(i+1)/steps*fb+0.01)
-    binm = binm - cutter
+    # merge near-coincident vertices left where the stepped round-over layers meet; without
+    # this, STL readers that weld vertices by position see zero-volume slivers
+    binm = (binm - cutter).simplify(SIMPLIFY_TOL)
     m = binm.to_mesh()
-    return trimesh.Trimesh(vertices=np.asarray(m.vert_properties)[:, :3], faces=np.asarray(m.tri_verts))
+    mesh = trimesh.Trimesh(vertices=np.asarray(m.vert_properties)[:, :3], faces=np.asarray(m.tri_verts))
+    return GenbinResult(mesh, max(0.0, recessZ - floorTop), nx, ny)

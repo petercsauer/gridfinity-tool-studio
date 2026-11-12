@@ -21,20 +21,34 @@ def page_mm(meta=META):
     return meta.get("pages", {}).get("letter", [215.9, 279.4])
 
 
+def marker_ids(meta=META):
+    """The ArUco ids printed on the calibration sheet (0-3)."""
+    return {int(i) for i in meta["markers"]}
+
+
 def detect_markers(img, meta=META):
-    """Return {marker id: 4x2 corner pixels} for every ArUco marker found."""
+    """Return {marker id: 4x2 corner pixels} for the sheet's markers found in ``img``.
+    Markers with ids that are not on the sheet are ignored."""
     d = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, meta["dict"]))
     det = cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())
     corners, ids, _ = det.detectMarkers(img)
+    wanted = marker_ids(meta)
     found = {}
     if ids is not None:
         for c, i in zip(corners, ids.flatten()):
-            found[int(i)] = c.reshape(4, 2)
+            if int(i) in wanted:
+                found[int(i)] = c.reshape(4, 2)
     return found
 
 
+def missing_markers(found, meta=META):
+    """Sorted ids of the sheet's markers that are not in ``found``."""
+    return sorted(marker_ids(meta) - set(found))
+
+
 def homography_img2mm(found, meta=META):
-    """Homography from image pixels to sheet mm, or None with fewer than 2 markers."""
+    """Homography from image pixels to sheet mm from all of the sheet's markers,
+    or None unless every one of them was found."""
     src = []
     dst = []
     for mid, cmm in meta["markers"].items():
@@ -42,7 +56,7 @@ def homography_img2mm(found, meta=META):
         if mid in found:
             src.extend(found[mid])
             dst.extend(cmm)
-    if len(src) < 8:
+    if missing_markers(found, meta):
         return None
     H, _ = cv2.findHomography(np.array(src, np.float32), np.array(dst, np.float32), cv2.RANSAC)
     return H
@@ -82,6 +96,8 @@ def sheet_view(img, outline_sheet_mm, meta=META, scale=SHEET_PX):
     extent in sheet mm [x0, y0, x1, y1]. Expands past the paper if the tool
     (``outline_sheet_mm``, in sheet mm) hangs off it."""
     H = homography_img2mm(detect_markers(img, meta), meta)
+    if H is None:
+        raise ValueError("No calibration sheet detected (not all four corner markers were found).")
     # crop to the sheet as defined by the 4 markers (outer edge of their white
     # quiet zone + a small margin) -- independent of Letter vs A4 paper
     mk = np.array([c for cs in meta["markers"].values() for c in cs], float)

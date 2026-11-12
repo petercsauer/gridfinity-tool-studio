@@ -26,3 +26,7 @@ R_BOT = 0.8
 PAD_BOTH = 35.6
 PAD_MID = 37.2
 R_MID = 1.6
+LIP_INSET = 1.8 + 1.4                      # stacking-lip trough: rim + lead-in, inset from the outer wall
+MIN_WALL = 1.2                             # minimum wall left between the pocket opening and the lip trough
+RECESS = 4.4                               # the pocket opens this far below the bin top (lip trough floor)
+FLOOR_MIN = 4.75 + 0.8                     # lowest pocket floor: top of the feet plus a 0.8 mm floor

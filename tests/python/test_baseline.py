@@ -42,20 +42,15 @@ def test_preset_outline_size_matches_pre_refactor(preset):
 
 
 def _default_bin(tool, outline):
-    P = symmetrize(outline) if SYM_DEFAULT[tool] else outline
+    P = symmetrize(outline).outline if SYM_DEFAULT[tool] else outline
     _, pocket = make_pocket(P, 2.5, True, 12.5, 6.0, 0.4)
     pc = xy(pocket)
-    nx, ny = footprint(pc)
+    nx, ny = footprint(pc, 3.175)
     pcc = pc - [(pc[:, 0].max()+pc[:, 0].min())/2, (pc[:, 1].max()+pc[:, 1].min())/2]
-    return genbin(pcc, nx, ny, 3, 10.0, 3.175, 0.0)
+    return genbin(pcc, nx, ny, 3, 10.0, 3.175, 0.0).mesh
 
 
-@pytest.mark.parametrize("tool", [
-    "needlenose", "combopliers", "flushcutter",
-    pytest.param("stripper", marks=pytest.mark.xfail(
-        strict=True, reason="Issue 4: the default stripper pocket breaks through the stacking lip "
-                            "(bin too small for the fillet); fixed in segment 1b")),
-])
+@pytest.mark.parametrize("tool", list(TOOLS))
 def test_default_bin_is_watertight(tool):
     assert _default_bin(tool, load_preset(tool).outline).is_watertight
 

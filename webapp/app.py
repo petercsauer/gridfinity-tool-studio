@@ -47,7 +47,7 @@ def process_upload(img):
     return tid, label, (assets.png, assets.outline, assets.crop_w, assets.crop_h)
 
 def symmetric_outline(tool, P):
-    if tool not in _symcache: _symcache[tool] = symmetrize(P)
+    if tool not in _symcache: _symcache[tool] = symmetrize(P).outline
     return _symcache[tool]
 
 # ===================== HTTP =====================
@@ -110,7 +110,7 @@ class H(BaseHTTPRequestHandler):
         tool, pocket = make_pocket(P, req.get("clearance",2.5), req.get("slotOn",True),
                                    req.get("slotR",12.5), req.get("slotOver",6.0), req.get("slotFrac",0.4))
         pc = xy(pocket); tc = xy(tool)
-        nx, ny = footprint(pc)
+        nx, ny = footprint(pc, req.get("fillet",3.175))
         if self.path.split("?")[0] == "/outline":
             st, sp = make_pocket(P0, req.get("clearance",2.5), req.get("slotOn",True),
                                  req.get("slotR",12.5), req.get("slotOver",6.0), req.get("slotFrac",0.4))
@@ -123,7 +123,7 @@ class H(BaseHTTPRequestHandler):
             return
         # /generate
         pcc = pc - [(pc[:,0].max()+pc[:,0].min())/2, (pc[:,1].max()+pc[:,1].min())/2]
-        tm = genbin(pcc, nx, ny, int(req.get("u",3)), req.get("depth",10.0), req.get("fillet",3.175), req.get("bfillet",0.0))
+        tm = genbin(pcc, nx, ny, int(req.get("u",3)), req.get("depth",10.0), req.get("fillet",3.175), req.get("bfillet",0.0)).mesh
         buf = trimesh.exchange.stl.export_stl(tm)
         self._send(200, buf, "model/stl")
 

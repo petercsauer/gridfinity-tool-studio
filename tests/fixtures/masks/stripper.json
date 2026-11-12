@@ -1,0 +1,13 @@
+{
+  "tool": "stripper",
+  "mask_png": "assets/presets/stripper_mask.png",
+  "rect_png": "assets/presets/stripper_rect.png",
+  "region_mm": [14,56,201,226],
+  "origin_mm": [14,56],
+  "px_per_mm": 8.0,
+  "size_px": [1496,1360],
+  "foreground_px": 387661,
+  "largest_contour_area_px": 391921.5,
+  "bbox_px": [117,109,1285,1192],
+  "min_area_rect_px": {"centre":[786.7504,589.9196],"size":[479.9928,1550.272],"angle_deg":-42.5359}
+}

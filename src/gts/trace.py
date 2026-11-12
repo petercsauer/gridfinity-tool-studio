@@ -10,7 +10,7 @@ import numpy as np
 
 from .constants import PRESETS_DIR, PX, REGION
 from .geometry import spline
-from .sheet import META, detect_markers, homography_img2mm, page_mm, rect_region
+from .sheet import META, detect_markers, homography_img2mm, missing_markers, page_mm, rect_region
 
 
 @dataclass(frozen=True)
@@ -136,9 +136,12 @@ def process_photo(img, meta=META, segment=rembg_mask, px=PX):
     visible and the whole tool is in the photo. Raises ValueError otherwise.
     ``segment`` maps a BGR image to a 0-255 mask (rembg by default)."""
     found = detect_markers(img, meta)
-    H = homography_img2mm(found, meta) if len(found) >= 4 else None
+    missing = missing_markers(found, meta)
+    H = None if missing else homography_img2mm(found, meta)
     if H is None:
-        raise ValueError(f"No calibration sheet detected (found {len(found)} of 4 markers). "
+        n = len(meta["markers"])
+        raise ValueError(f"No calibration sheet detected (found {n-len(missing)} of {n} markers; "
+                         f"missing {', '.join(map(str, missing)) or 'none'}). "
                          "Photograph the tool on the printed calibration sheet with all four corner markers "
                          "visible and not covered by the tool.")
     pw, ph = page_mm(meta)

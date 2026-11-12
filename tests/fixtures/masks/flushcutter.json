@@ -1,0 +1,13 @@
+{
+  "tool": "flushcutter",
+  "mask_png": "assets/presets/flushcutter_mask.png",
+  "rect_png": "assets/presets/flushcutter_rect.png",
+  "region_mm": [14,56,201,226],
+  "origin_mm": [14,56],
+  "px_per_mm": 8.0,
+  "size_px": [1496,1360],
+  "foreground_px": 202578,
+  "largest_contour_area_px": 200599.5,
+  "bbox_px": [453,96,672,1042],
+  "min_area_rect_px": {"centre":[773.5126,612.1992],"size":[671.7201,1031.3574],"angle_deg":-1.873}
+}
