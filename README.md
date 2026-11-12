@@ -60,9 +60,8 @@ cells (or half cells, with half-grid feet) to fit the pocket. Screw holes raise 
 6.8 mm so the pocket can't break into them. The 3D preview keeps your camera angle between rebuilds;
 double‑click it to re‑frame.
 
-The trace shows the pocket's width and length as dimension lines and the clearance on each side (the gap
-between the tool's and the pocket's bounding boxes, which the finger slot widens), all measured along the
-tool's own axes. The same sizes are listed under the Pocket settings.
+The trace shows the pocket's width and length as dimension lines, measured along the tool's own axes. The
+pocket and tool sizes are also listed under the Pocket settings.
 
 **Trace outline › SVG / DXF** saves the traced outline and the pocket (clearance plus finger slot) at 1:1 in
 millimetres, on separate layers, for laser‑cutting foam inserts or drawing your own bin in CAD. DXF is R12,
