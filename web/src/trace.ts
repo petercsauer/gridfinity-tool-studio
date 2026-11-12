@@ -1,7 +1,7 @@
 // The Trace pane: the perspective-corrected calibration sheet with the tool (blue) and
 // pocket (red) outlines drawn where the tool lies on the paper, all in sheet mm, plus the mirror
-// axis (green, dashed) when "Symmetric tool" is on, and the pocket's width and length (dimension
-// lines) and its clearance on each side (red labels), measured along the tool's own axes.
+// axis (green, dashed) when "Symmetric tool" is on, and the pocket's width and length as dimension
+// lines, measured along the tool's own axes.
 import type { Measurements, OutlineResult } from './worker/protocol';
 
 export const isDark = () => document.documentElement.dataset.theme === 'dark';
@@ -25,10 +25,10 @@ function upright(dx: number, dy: number): number {
 
 const fmt = (v: number) => v.toFixed(1);
 
-/** Dimension lines for the pocket's width and length, and its clearance on each side. `toScreen` maps the
+/** Dimension lines for the pocket's width and length. `toScreen` maps the
  * upright outline frame (mm) to canvas pixels. */
 /** Label font size (canvas px; follows the pane, within 9 to 12 css px) and how far outside the pocket's box
- * the dimension lines sit (the clearance labels go between). */
+ * the dimension lines sit. */
 function measureLayout(W: number, H: number, dpr: number): { fs: number; dimOff: number; margin: number } {
   const fs = Math.max(9, Math.min(12, Math.min(W, H) / dpr / 45)) * dpr;
   const dimOff = 2.6 * fs;
@@ -44,10 +44,9 @@ function boxOnSheet(m: Measurements): Pt[] {
 }
 
 function drawMeasure(ctx: CanvasRenderingContext2D, m: Measurements, toScreen: (q: Pt) => Pt,
-  W: number, H: number, dpr: number, cPocket: string, avoidAxis: boolean): void {
+  W: number, H: number, dpr: number): void {
   const k = m.pocket;
   const { fs, dimOff } = measureLayout(W, H, dpr);
-  const gapOff = 0.4 * fs; // clearance labels sit just outside the pocket's box
   const ink = 'rgba(29,29,31,.82)';
   const halo = 'rgba(255,255,255,.8)';
   const o = toScreen([0, 0]);
@@ -58,12 +57,12 @@ function drawMeasure(ctx: CanvasRenderingContext2D, m: Measurements, toScreen: (
     return [(x - o[0]) / l, (y - o[1]) / l];
   };
   const add = (p: Pt, d: Pt, f: number): Pt => [p[0] + d[0] * f, p[1] + d[1] * f];
-  /** The four sides of the pocket box: ends, outward normal on screen, and the gap on that side. */
+  /** The four sides of the pocket box: ends and outward normal on screen. */
   const sides = [
-    { a: [k.xmin, k.ymin], b: [k.xmax, k.ymin], n: dir([0, -1]), gap: m.gaps.ymin, along: 'x' },
-    { a: [k.xmin, k.ymax], b: [k.xmax, k.ymax], n: dir([0, 1]), gap: m.gaps.ymax, along: 'x' },
-    { a: [k.xmin, k.ymin], b: [k.xmin, k.ymax], n: dir([-1, 0]), gap: m.gaps.xmin, along: 'y' },
-    { a: [k.xmax, k.ymin], b: [k.xmax, k.ymax], n: dir([1, 0]), gap: m.gaps.xmax, along: 'y' },
+    { a: [k.xmin, k.ymin], b: [k.xmax, k.ymin], n: dir([0, -1]), along: 'x' },
+    { a: [k.xmin, k.ymax], b: [k.xmax, k.ymax], n: dir([0, 1]), along: 'x' },
+    { a: [k.xmin, k.ymin], b: [k.xmin, k.ymax], n: dir([-1, 0]), along: 'y' },
+    { a: [k.xmax, k.ymin], b: [k.xmax, k.ymax], n: dir([1, 0]), along: 'y' },
   ].map((sd) => ({ ...sd, A: toScreen(sd.a as Pt), B: toScreen(sd.b as Pt) }));
   ctx.save();
   ctx.font = `600 ${fs}px -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif`;
@@ -133,26 +132,6 @@ function drawMeasure(ctx: CanvasRenderingContext2D, m: Measurements, toScreen: (
     ctx.stroke();
     ctx.fillStyle = '#1d1d1f';
     ctx.fillText(text, 0, 0.05 * fs);
-    ctx.restore();
-  }
-  // the clearance on each side, just outside the pocket's box at the middle of the side, along it
-  ctx.font = `600 ${0.88 * fs}px -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif`;
-  ctx.lineJoin = 'round';
-  for (const sd of sides) {
-    const mid: Pt = [(sd.A[0] + sd.B[0]) / 2, (sd.A[1] + sd.B[1]) / 2];
-    const at = add(mid, sd.n, gapOff + 0.5 * fs);
-    const text = `${fmt(sd.gap)}`;
-    // the mirror axis runs through the middle of the end sides: move those labels beside it
-    const nudge = avoidAxis && sd.along === 'x' ? ctx.measureText(text).width / 2 + 0.45 * fs : 0;
-    ctx.save();
-    ctx.translate(at[0], at[1]);
-    ctx.rotate(upright(sd.B[0] - sd.A[0], sd.B[1] - sd.A[1]));
-    ctx.translate(nudge, 0);
-    ctx.lineWidth = 3 * dpr;
-    ctx.strokeStyle = halo;
-    ctx.strokeText(text, 0, 0);
-    ctx.fillStyle = cPocket;
-    ctx.fillText(text, 0, 0);
     ctx.restore();
   }
   ctx.restore();
@@ -290,7 +269,7 @@ export class TraceView {
     if (o.measure) {
       const [[a, b, c], [d, e, f]] = o.measure.up2sheet;
       drawMeasure(ctx, o.measure, ([x, y]) => [ox + (a * x + b * y + c - bx0) * s, oy + (d * x + e * y + f - by0) * s],
-        W, H, dpr, cPocket, !!o.sheetAxis);
+        W, H, dpr);
     }
     flat.parentElement!.classList.toggle('has-measure', !!o.measure);
     flat.parentElement!.classList.add('ready');
