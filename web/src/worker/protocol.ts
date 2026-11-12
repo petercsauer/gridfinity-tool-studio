@@ -32,6 +32,8 @@ export interface OutlineResult {
   /** Deepest pocket for the requested height, and the depth that will be cut. */
   maxDepth: number;
   effectiveDepth: number;
+  /** How symmetric the tool is (mirror IoU, 1 = perfectly). */
+  symmetryScore: number;
 }
 
 export interface BuildResult {
@@ -57,10 +59,17 @@ export interface UploadResult extends ToolInfo {
   sheetBox: Box;
 }
 
+/** An uploaded tool as the worker needs it: the upload result with the sheet view as a URL (an object URL the
+ * UI thread created for `sheetViewJpeg`) instead of the image itself. */
+export type StoredTool = Omit<UploadResult, 'sheetViewJpeg'> & { sheetImage: string };
+
+/** Upload progress: finding the sheet, downloading the model (bytes), then tracing the tool. */
+export type Progress = { stage: 'sheet' } | { stage: 'model'; loaded: number; total: number } | { stage: 'trace' };
+
 /** Sent by the worker while a request runs (before its response), e.g. during the model download. */
 export interface ProgressMessage {
   id: number;
-  progress: { stage: 'model'; loaded: number; total: number };
+  progress: Progress;
 }
 
 export interface Requests {
@@ -71,6 +80,9 @@ export interface Requests {
   build: { params: Params };
   /** A photo decoded on the UI thread (decodePhoto); send its pixel buffer as a transferable. */
   upload: { image: RGBAImage; name: string };
+  /** Make an uploaded tool (restored from storage or just uploaded) available to outline and build. */
+  addTool: { tool: StoredTool };
+  removeTool: { id: string };
 }
 
 export interface Results {
@@ -79,6 +91,8 @@ export interface Results {
   outline: OutlineResult;
   build: BuildResult;
   upload: UploadResult;
+  addTool: null;
+  removeTool: null;
 }
 
 export type Kind = keyof Requests;

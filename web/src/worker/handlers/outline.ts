@@ -34,5 +34,6 @@ export async function outline(raw: Params, { manifold, presets }: Deps): Promise
     h: round(Math.max(...ys) - Math.min(...ys), 1),
     maxDepth: maxDepth(p.u),
     effectiveDepth: effectiveDepth(p.u, p.depth),
+    symmetryScore: preset.symmetry_score,
   };
 }

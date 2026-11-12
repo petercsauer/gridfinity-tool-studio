@@ -5,7 +5,7 @@ import { initManifold } from '../../geometry/manifold';
 import { hausdorff, presetFixture, TOOLS } from '../../test/fixtures';
 import { DEFAULTS } from '../../params';
 import type { Deps } from '../deps';
-import type { PresetData, PresetSource } from '../presets';
+import { withUploads, type PresetData, type PresetSource } from '../presets';
 import { PipelineError } from '../protocol';
 import { outline } from './outline';
 
@@ -69,5 +69,24 @@ describe('outline handler parameters', () => {
 
   it('rejects unknown tools with a typed error', async () => {
     await expect(outline({ ...DEFAULTS, tool: 'nope' }, deps)).rejects.toMatchObject({ code: 'unknown-tool' });
+  });
+
+  it('serves registered uploads until they are removed', async () => {
+    const p = await diskPresets.get('stripper');
+    const tools = withUploads(diskPresets);
+    tools.add({
+      id: 'up-test', label: 'Mine', sym: false, outline: p.outline_mm, crop: p.crop_mm, up2sheet: p.up2sheet,
+      symmetry: { outline: p.symmetric_outline_mm, score: p.symmetry_score, axisDeg: 0, offset: 0 },
+      sheetBox: p.sheet_box_mm, sheetImage: 'blob:http://localhost/abc',
+    });
+    const up = { ...DEFAULTS, tool: 'up-test' };
+    const r = await outline(up, { ...deps, presets: tools });
+    const ref = await outline({ ...up, tool: 'stripper' }, deps);
+    expect(r.pocket).toEqual(ref.pocket);
+    expect(r.sheetImage).toBe('blob:http://localhost/abc');
+    expect(r.symmetryScore).toBe(p.symmetry_score);
+    expect((await tools.list()).map((t) => t.id)).not.toContain('up-test');
+    tools.remove('up-test');
+    await expect(outline(up, { ...deps, presets: tools })).rejects.toMatchObject({ code: 'unknown-tool' });
   });
 });

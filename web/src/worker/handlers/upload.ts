@@ -26,12 +26,15 @@ export interface UploadEnv {
   /** Background removal: an RGBA image to a 0-255 mask of the same size. */
   segment(img: RGBAImage): Promise<Mask>;
   encodeJpeg(img: RGBAImage): Promise<Blob>;
+  /** Told when the pipeline moves to finding the sheet and then to tracing the tool. */
+  stage?(stage: 'sheet' | 'trace'): void;
 }
 
 /** The worker's environment: IS-Net from the Cache API (downloaded on first use, reporting progress) and
  * OffscreenCanvas for the JPEG. */
-export function workerUploadEnv(onProgress?: Progress): UploadEnv {
+export function workerUploadEnv(onProgress?: Progress, stage?: UploadEnv['stage']): UploadEnv {
   return {
+    stage,
     segment: async (img) => segment(await getSession(onProgress), img),
     async encodeJpeg({ data, width, height }) {
       const canvas = new OffscreenCanvas(width, height);
@@ -134,7 +137,9 @@ const label = (name: string) => name.trim().slice(0, 40) || 'Upload';
 /** Trace a calibration-sheet photo (RGBA, long side at most MAX_SIDE) into a new tool. */
 export async function upload(image: RGBAImage, name: string, { manifold }: Deps, env: UploadEnv): Promise<UploadResult> {
   checkImage(image);
+  env.stage?.('sheet');
   const H = await findSheet(image);
+  env.stage?.('trace');
   const cv = await getCv();
   const [pw, ph] = SHEET.pageMm;
 

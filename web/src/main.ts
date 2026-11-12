@@ -5,11 +5,13 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { maxDepth } from './geometry/pocket';
 import { clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
+import { loadUploads, removeUpload, saveUpload, touchUpload } from './storage';
 import { writeStl } from './stl';
 import { isDark, TraceView } from './trace';
 import { decodePhoto } from './vision/decode';
+import { modelCached } from './vision/model';
 import { PipelineClient } from './worker/client';
-import { PipelineError, type BuildResult, type ToolInfo } from './worker/protocol';
+import { PipelineError, type BuildResult, type Progress, type ToolInfo, type UploadResult } from './worker/protocol';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const input = (id: string) => $<HTMLInputElement>(id);
@@ -38,13 +40,37 @@ function state(): Params {
   });
 }
 
-// ---- tools
+// ---- tools: the presets, then the user's uploads (kept in IndexedDB, see storage.ts)
 let tools: ToolInfo[] = [];
-function addToolOption(t: ToolInfo): void {
+const toolMenu = $<HTMLSelectElement>('tool');
+const uploadGroup = document.createElement('optgroup');
+uploadGroup.label = 'Your uploads';
+/** Object URLs of the uploads' sheet images, by tool id. */
+const sheetUrls = new Map<string, string>();
+function addToolOption(t: ToolInfo, parent: HTMLElement = toolMenu): void {
   const o = document.createElement('option');
   o.value = t.id;
   o.textContent = t.label;
-  $('tool').appendChild(o);
+  parent.appendChild(o);
+}
+const isUpload = (id: string) => sheetUrls.has(id);
+/** Make an upload selectable: register it with the worker and add it to the menu. */
+function addUploadTool(u: UploadResult): void {
+  const { sheetViewJpeg, ...rest } = u;
+  const sheetImage = URL.createObjectURL(sheetViewJpeg);
+  sheetUrls.set(u.id, sheetImage);
+  void client.request('addTool', { tool: { ...rest, sheetImage } });
+  tools.push({ id: u.id, label: u.label, sym: u.sym });
+  addToolOption(u, uploadGroup);
+  if (!uploadGroup.isConnected) toolMenu.appendChild(uploadGroup);
+}
+function dropUploadTool(id: string): void {
+  void client.request('removeTool', { id });
+  URL.revokeObjectURL(sheetUrls.get(id) ?? '');
+  sheetUrls.delete(id);
+  tools = tools.filter((t) => t.id !== id);
+  [...uploadGroup.children].find((o) => (o as HTMLOptionElement).value === id)?.remove();
+  if (!uploadGroup.children.length) uploadGroup.remove();
 }
 
 // ---- 2D trace
@@ -352,6 +378,9 @@ let tooLarge = false;
 /** The latest outline refresh; a build waits for it so it sees the current footprint. */
 let pendingOutline: Promise<void> = Promise.resolve();
 
+/** Below this mirror IoU, "Symmetric tool" warns that the pocket will be wider than the tool. */
+const SYMMETRIC_SCORE = 0.92;
+
 async function refreshOutline(): Promise<void> {
   const p = state();
   let r;
@@ -365,6 +394,7 @@ async function refreshOutline(): Promise<void> {
   $('cells').textContent = `${r.nx}×${r.ny}`;
   $('pdim').textContent = `${r.w}×${r.h} mm`;
   $('bdim').textContent = `${(r.nx * 42 - 0.5).toFixed(0)}×${(r.ny * 42 - 0.5).toFixed(0)}×${(p.u * 7).toFixed(0)} mm`;
+  $('symNote').hidden = !(p.sym && r.symmetryScore < SYMMETRIC_SCORE);
   tooLarge = r.nx > MAX_CELLS || r.ny > MAX_CELLS;
   if (tooLarge) {
     previewMsg.textContent = `This tool needs a ${r.nx}×${r.ny} bin; the largest is ${MAX_CELLS}×${MAX_CELLS}. ` +
@@ -471,45 +501,110 @@ input('depth').addEventListener('input', () => {
 });
 input('slotOn').addEventListener('change', changed);
 input('sym').addEventListener('change', changed);
+/** Switch defaults and the Remove row for the selected tool. */
 function applyToolDefaults(): void {
-  const t = tools.find((x) => x.id === $<HTMLSelectElement>('tool').value);
+  const id = toolMenu.value;
+  const t = tools.find((x) => x.id === id);
   if (t) input('sym').checked = t.sym;
+  $('rmRow').hidden = !isUpload(id);
+  if (isUpload(id)) void touchUpload(id).catch(() => {});
 }
-$('tool').addEventListener('change', () => {
+function selectTool(id: string): void {
+  toolMenu.value = id;
   needFrame = true;
   applyToolDefaults();
   changed();
-});
+}
+toolMenu.addEventListener('change', () => selectTool(toolMenu.value));
 $('gen').addEventListener('click', () => void generate());
 
 // ---- upload a new tool photo (calibration sheet required)
-$('upBtn').addEventListener('click', () => input('upFile').click());
+const upMsg = $('upMsg');
+const upBtn = $<HTMLButtonElement>('upBtn');
+function say(text: string, tone: 'info' | 'ok' | 'error' = 'info'): void {
+  upMsg.textContent = text;
+  upMsg.classList.toggle('ok', tone === 'ok');
+  upMsg.classList.toggle('error', tone === 'error');
+}
+/** The model download needs the user's go-ahead once; afterwards it is in the Cache API. */
+let modelConsent = false;
+function askModelConsent(): Promise<boolean> {
+  const box = $('consent');
+  box.hidden = false;
+  $('consentYes').focus();
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => {
+      box.hidden = true;
+      $('consentYes').removeEventListener('click', yes);
+      $('consentNo').removeEventListener('click', no);
+      resolve(ok);
+    };
+    const yes = () => done(true);
+    const no = () => done(false);
+    $('consentYes').addEventListener('click', yes);
+    $('consentNo').addEventListener('click', no);
+  });
+}
+function showProgress(p: Progress): void {
+  if (p.stage === 'sheet') say('Finding the sheet…');
+  else if (p.stage === 'trace') say('Tracing…');
+  else if (p.loaded < p.total) say(`Downloading the AI model… ${Math.floor((p.loaded / p.total) * 100)}%`);
+  else say('Tracing…');
+}
+async function uploadPhoto(file: File): Promise<void> {
+  if (!modelConsent && !(await modelCached().catch(() => false))) {
+    say('');
+    if (!(await askModelConsent())) {
+      say('Upload cancelled. Nothing was downloaded.');
+      return;
+    }
+    modelConsent = true;
+  }
+  say('Reading the photo…');
+  const image = await decodePhoto(file, file.name);
+  const name = file.name.replace(/\.[^.]+$/, '').slice(0, 40);
+  const t = await client.request('upload', { image, name }, [image.data.buffer], showProgress);
+  if (!t) return;
+  let dropped: string[] = [];
+  let saved = true;
+  try {
+    dropped = await saveUpload(t);
+  } catch {
+    saved = false; // e.g. storage full or private browsing: still usable until reload
+  }
+  dropped.forEach(dropUploadTool);
+  addUploadTool(t);
+  selectTool(t.id);
+  say(saved ? `Added “${t.label}”. Turn on “Symmetric tool” if it is.`
+    : `Added “${t.label}” for this visit; this browser couldn't save it.`, 'ok');
+}
+upBtn.addEventListener('click', () => input('upFile').click());
 input('upFile').addEventListener('change', async () => {
   const file = input('upFile').files?.[0];
   if (!file) return;
-  const msg = $('upMsg');
-  msg.style.color = 'var(--muted)';
-  msg.textContent = 'Finding calibration sheet and tracing the tool…';
-  $<HTMLButtonElement>('upBtn').disabled = true;
+  upBtn.disabled = true;
   try {
-    const image = await decodePhoto(file, file.name);
-    const t = await client.request('upload', { image, name: file.name.replace(/\.[^.]+$/, '').slice(0, 40) }, [image.data.buffer]);
-    if (!t) return;
-    tools.push(t);
-    addToolOption(t);
-    $<HTMLSelectElement>('tool').value = t.id;
-    needFrame = true;
-    applyToolDefaults();
-    changed();
-    msg.style.color = 'var(--ok)';
-    msg.textContent = `Added “${t.label}”. Tick “Symmetric tool” if it is.`;
+    await uploadPhoto(file);
   } catch (e) {
-    msg.style.color = 'var(--accent2)';
-    msg.textContent = errorText(e);
+    say(errorText(e), 'error');
   } finally {
-    $<HTMLButtonElement>('upBtn').disabled = false;
+    upBtn.disabled = false;
     input('upFile').value = '';
   }
+});
+$('rmBtn').addEventListener('click', async () => {
+  const id = toolMenu.value;
+  if (!isUpload(id)) return;
+  const label = tools.find((t) => t.id === id)?.label ?? '';
+  try {
+    await removeUpload(id);
+  } catch (e) {
+    say(errorText(e), 'error');
+    return;
+  }
+  dropUploadTool(id);
+  selectTool(tools[0]?.id ?? '');
+  say(`Removed “${label}”.`);
 });
 window.addEventListener('resize', () => trace.draw());
 
@@ -541,7 +636,12 @@ window.addEventListener('themechange', () => {
 // ---- start
 try {
   tools = (await client.request('listTools', {})) ?? [];
-  tools.forEach(addToolOption);
+  tools.forEach((t) => addToolOption(t));
+  try {
+    (await loadUploads()).forEach(addUploadTool);
+  } catch {
+    say('Your saved uploads could not be loaded from this browser.', 'error');
+  }
   applyToolDefaults();
   syncDepth();
   syncExport();

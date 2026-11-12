@@ -54,7 +54,7 @@ describe('PipelineClient', () => {
     const c = new PipelineClient(port);
     const seen: number[] = [];
     const image = { width: 1, height: 1, data: new Uint8ClampedArray(4) };
-    const r = c.request('upload', { image, name: 'x' }, [], (p) => seen.push(p.loaded));
+    const r = c.request('upload', { image, name: 'x' }, [], (p) => { if (p.stage === 'model') seen.push(p.loaded); });
     const id = sent[0]!.id;
     const progress = (loaded: number) => ({ id, progress: { stage: 'model', loaded, total: 2 } }) as unknown as Response;
     reply(progress(1));

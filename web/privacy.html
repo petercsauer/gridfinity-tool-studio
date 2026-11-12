@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="color-scheme" content="light dark"/>
+<title>Privacy · Gridfinity Tool Studio</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml"/>
+<script vite-ignore src="theme.js"></script>
+<link rel="stylesheet" href="/src/styles.css"/>
+</head>
+<body class="page">
+<main class="doc">
+  <p class="back"><a href="./">‹ Gridfinity Tool Studio</a></p>
+  <h1 class="title">Privacy</h1>
+  <p class="lede">Gridfinity Tool Studio runs entirely in your browser. Your photos are processed on your device and never uploaded.</p>
+
+  <h2 class="section">Your photos and tools</h2>
+  <div class="card prose">
+    <p>When you upload a photo, finding the calibration sheet, removing the background and tracing the tool all happen on this device. The photo is not sent anywhere.</p>
+    <p>Each traced tool (a reduced, perspective-corrected image of the sheet and the tool’s outline) is stored only in this browser’s storage, so it is still there next time. Select an uploaded tool and choose <b>Remove</b> to delete it, or clear this site’s data in your browser settings to delete everything. At most 20 uploads are kept; older ones are removed first.</p>
+  </div>
+
+  <h2 class="section">Downloads from other services</h2>
+  <div class="card prose">
+    <p>The first time you upload a photo, the app asks before it downloads the background-removal AI model (about 88 MB) from <b>Hugging Face</b> (huggingface.co). It also loads the <b>onnxruntime</b> engine that runs the model from <b>jsDelivr</b> (cdn.jsdelivr.net). Both are cached by your browser. Those services see an ordinary download request (your IP address and browser details), as with any website; they never receive your photos.</p>
+  </div>
+
+  <h2 class="section">Hosting</h2>
+  <div class="card prose">
+    <p>The app is hosted on <b>Cloudflare Pages</b>, which serves its files and may keep standard request logs for security and operations.</p>
+  </div>
+
+  <h2 class="section">No tracking</h2>
+  <div class="card prose">
+    <p>There are no analytics, no advertising, no accounts and no cookies.</p>
+  </div>
+</main>
+</body>
+</html>

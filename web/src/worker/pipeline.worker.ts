@@ -5,7 +5,7 @@ import { build } from './handlers/build';
 import { outline } from './handlers/outline';
 import { upload, workerUploadEnv } from './handlers/upload';
 import type { Deps } from './deps';
-import { fetchPresets, type PresetSource } from './presets';
+import { fetchPresets, withUploads, type ToolSource } from './presets';
 import { PipelineError, type ProgressMessage, type Request, type Response, type Results } from './protocol';
 
 interface WorkerScope {
@@ -14,9 +14,9 @@ interface WorkerScope {
 }
 const scope = self as unknown as WorkerScope;
 
-let presets: PresetSource | null = null;
+let presets: ToolSource | null = null;
 
-function configured(): PresetSource {
+function configured(): ToolSource {
   if (!presets) throw new PipelineError('internal', 'The worker was not configured.');
   return presets;
 }
@@ -28,7 +28,7 @@ async function deps(): Promise<Deps> {
 async function handle(req: Request): Promise<Results[Request['kind']]> {
   switch (req.kind) {
     case 'configure':
-      presets = fetchPresets(req.assetBase);
+      presets = withUploads(fetchPresets(req.assetBase));
       return null;
     case 'listTools':
       return configured().list();
@@ -37,10 +37,17 @@ async function handle(req: Request): Promise<Results[Request['kind']]> {
     case 'build':
       return build(req.params, await deps());
     case 'upload': {
-      const progress = (loaded: number, total: number) =>
-        scope.postMessage({ id: req.id, progress: { stage: 'model', loaded, total } } satisfies ProgressMessage);
-      return upload(req.image, req.name, await deps(), workerUploadEnv(progress));
+      const post = (progress: ProgressMessage['progress']) => scope.postMessage({ id: req.id, progress } satisfies ProgressMessage);
+      const env = workerUploadEnv((loaded, total) => post({ stage: 'model', loaded, total }), (stage) => post({ stage }));
+      return upload(req.image, req.name, await deps(), env);
     }
+    // synchronous, so a later outline or build request already sees the tool
+    case 'addTool':
+      configured().add(req.tool);
+      return null;
+    case 'removeTool':
+      configured().remove(req.id);
+      return null;
   }
 }
 

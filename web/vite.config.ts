@@ -7,7 +7,12 @@ export default defineConfig({
   // onnxruntime-web without its ~30 MB wasm bundled: src/vision/model.ts loads it from jsDelivr instead
   resolve: { conditions: ['onnxruntime-web-use-extern-wasm', ...defaultClientConditions] },
   // three.js alone is ~550 kB minified; it is one cacheable chunk on purpose
-  build: { target: 'es2022', chunkSizeWarningLimit: 800 },
+  build: {
+    target: 'es2022',
+    chunkSizeWarningLimit: 800,
+    rollupOptions: { input: { main: 'index.html', privacy: 'privacy.html' } },
+  },
+  preview: { port: 4175, strictPort: true },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],

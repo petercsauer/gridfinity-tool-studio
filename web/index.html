@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="color-scheme" content="light dark"/>
 <title>Gridfinity Tool Studio</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml"/>
 <script vite-ignore src="theme.js"></script>
 <link rel="stylesheet" href="/src/styles.css"/>
 </head>
@@ -61,9 +62,15 @@
     <div class="card">
       <div class="row"><label for="tool">Saved tool</label><select id="tool"></select></div>
       <div class="row"><label for="upBtn">Photo</label><button class="btn" id="upBtn">Upload Photo…</button></div>
+      <div class="row" id="rmRow" hidden><span class="row-note">Saved in this browser</span><button class="btn" id="rmBtn">Remove</button></div>
       <div class="row" title="Mirror the outline for a clean, even cutout"><label for="sym">Symmetric tool</label><input type="checkbox" id="sym" role="switch"></div>
     </div>
-    <input type="file" id="upFile" accept="image/*" hidden>
+    <div class="footer warn" id="symNote" hidden>This tool doesn’t look symmetric — the pocket will be wider than needed.</div>
+    <input type="file" id="upFile" accept="image/*,.heic,.heif" hidden>
+    <div class="notice" id="consent" role="alertdialog" aria-labelledby="consentText" hidden>
+      <p id="consentText">This downloads an 88 MB AI model once (about 1–2 minutes on mobile data). Continue?</p>
+      <div class="btn-pair"><button class="btn" id="consentNo">Cancel</button><button class="btn primary" id="consentYes">Continue</button></div>
+    </div>
     <ol class="tips">
       <li>Print the sheet at <b>100% / Actual Size</b>, then lay the tool flat on it.</li>
       <li><b>Tool bigger than the grid? That's fine.</b> It can run past the grid or off the paper. Just keep it off the 4 corner markers and fully in the photo.</li>
@@ -71,7 +78,7 @@
       <li>On iPhone, turn on Settings › Camera › <b>Grid</b>, then line up the two <b>crosshairs</b> in the Camera app before you shoot.</li>
       <li>Keep all <b>4 corner markers</b> uncovered and in the frame.</li>
     </ol>
-    <div class="footer" id="upMsg">Photos without the calibration sheet are rejected.</div>
+    <div class="footer" id="upMsg" role="status">Photos without the calibration sheet are rejected.</div>
 
     <h2 class="section">Pocket</h2>
     <div class="card">
@@ -133,6 +140,7 @@
         <input type="range" id="bfillet" min="0" max="4" step="0.25" value="0" style="--p:0.0%">
       </div>
     </div>
+    <div class="footer legal">Photos are processed on your device and never uploaded. <a href="privacy.html">Privacy</a></div>
   </div>
 </aside>
 
