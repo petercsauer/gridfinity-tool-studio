@@ -9,12 +9,12 @@ import onshape
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out")
 CELL = 42.0; GAP = 0.5
-TMPL = open(os.path.join(os.path.dirname(__file__), "gridfinity.fs.tmpl")).read()
+TMPL = open(os.path.join(os.path.dirname(__file__), "gridfinity.fs.tmpl"), encoding="utf-8").read()
 
 def main():
     a = sys.argv[1:]; name = a[0] if a and not a[0].startswith("--") else "flushcutter"
     u = int(a[a.index("--u")+1]) if "--u" in a else 3
-    ids = json.load(open("/tmp/gf_onshape.json")); did, wid = ids["did"], ids["wid"]
+    ids = json.load(open("/tmp/gf_onshape.json", encoding="utf-8")); did, wid = ids["did"], ids["wid"]
     fseid, ps = ids["featurestudio"], ids["partstudio"]; ns = ids["ns"]
 
     pk = np.load(os.path.join(OUT, f"{name}_pocket.npy"))
@@ -32,7 +32,7 @@ def main():
     if not (isinstance(fsp, dict) and fsp.get("featureSpecs")):
         print("COMPILE FAIL:", str(fsp)[:600]); return
     micro = [e for e in onshape.req("GET", f"/documents/d/{did}/w/{wid}/elements?elementId={fseid}")[1]][0]["microversionId"]
-    ns = f"e{fseid}::m{micro}"; ids["ns"] = ns; json.dump(ids, open("/tmp/gf_onshape.json","w"))
+    ns = f"e{fseid}::m{micro}"; ids["ns"] = ns; json.dump(ids, open("/tmp/gf_onshape.json","w", encoding="utf-8"))
 
     # remove existing custom features, add the gridfinity one
     st, f = onshape.req("GET", f"/partstudios/d/{did}/w/{wid}/e/{ps}/features")

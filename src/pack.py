@@ -62,7 +62,7 @@ for n in TOOLS:
     p=polys[n]+[ox,oy]; t=tools[n]+[ox,oy]
     el.append('<path d="M '+" L ".join(f"{a:.2f},{b:.2f}" for a,b in p)+' Z" fill="#fde0e0" fill-opacity="0.7" stroke="#d81f1f" stroke-width="0.5"/>')
     el.append('<path d="M '+" L ".join(f"{a:.2f},{b:.2f}" for a,b in t)+' Z" fill="none" stroke="#1f4e79" stroke-width="0.4"/>')
-open(os.path.join(OUT,"tools_combined.svg"),"w").write(
+open(os.path.join(OUT,"tools_combined.svg"),"w",encoding="utf-8").write(
     f'<svg xmlns="http://www.w3.org/2000/svg" width="{total_w:.1f}mm" height="{total_h:.1f}mm" '
     f'viewBox="-2 -2 {total_w+4:.1f} {total_h+4:.1f}">'+"".join(el)+"</svg>")
 print(f"wrote out/tools_combined.svg  ({int(total_w//CELL)}x{rows} cells, {total_w:.0f}x{total_h:.0f} mm)")

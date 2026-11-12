@@ -3,20 +3,8 @@ __pycache__/
 .DS_Store
 # local experiments from early prototypes (hardcoded to local photos)
 experiments/
-# generated output: keep only what the app needs at runtime
-out/*
-!out/sheet_markers.json
-!out/calibration_sheet_letter.pdf
-!out/calibration_sheet_a4.pdf
-!out/calibration_sheet_letter_preview.png
-!out/rectified_needlenose.png
-!out/rectified_combopliers.png
-!out/rectified_flushcutter.png
-!out/rectified_stripper.png
-!out/rembgmask_needlenose.png
-!out/rembgmask_combopliers.png
-!out/rembgmask_flushcutter.png
-!out/rembgmask_stripper.png
+# generated output from the command-line tools (runtime data lives in assets/)
+out/
 .claude/
 node_modules/
 dist/

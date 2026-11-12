@@ -13,7 +13,7 @@ TOOLS = [("FLUSHCUTTER", "flushcutter", "Flush cutter"),
          ("NEEDLENOSE",  "needlenose",  "Needle-nose"),
          ("COMBOPLIERS", "combopliers", "Combo pliers"),
          ("STRIPPER",    "stripper",    "Wire stripper")]
-HELPERS = open(os.path.join(os.path.dirname(__file__), "gridfinity.fs.tmpl")).read()
+HELPERS = open(os.path.join(os.path.dirname(__file__), "gridfinity.fs.tmpl"), encoding="utf-8").read()
 
 def resample(c, n):
     cl = np.vstack([c, c[:1]])
@@ -79,10 +79,10 @@ def build_fs():
     return head + rest
 
 def main():
-    ids = json.load(open("/tmp/gf_onshape.json")); did, wid = ids["did"], ids["wid"]
+    ids = json.load(open("/tmp/gf_onshape.json", encoding="utf-8")); did, wid = ids["did"], ids["wid"]
     fseid = ids["featurestudio"]
     fs = build_fs()
-    open("/tmp/gridfinity_all.fs", "w").write(fs)
+    open("/tmp/gridfinity_all.fs", "w", encoding="utf-8").write(fs)
     st, _ = onshape.req("POST", f"/featurestudios/d/{did}/w/{wid}/e/{fseid}", {"contents": fs})
     print("push FS HTTP", st)
     st, fsp = onshape.req("GET", f"/featurestudios/d/{did}/w/{wid}/e/{fseid}/featurespecs")
@@ -98,7 +98,7 @@ def main():
         if base not in ps_map:
             st, el = onshape.req("POST", f"/partstudios/d/{did}/w/{wid}", {"name": label})
             ps_map[base] = el["id"]; print("created PS", label, el["id"])
-    ids["ps_map"] = ps_map; ids["ns"] = ns; json.dump(ids, open("/tmp/gf_onshape.json","w"))
+    ids["ps_map"] = ps_map; ids["ns"] = ns; json.dump(ids, open("/tmp/gf_onshape.json","w", encoding="utf-8"))
 
     for enum, base, label in TOOLS:
         ps = ps_map[base]

@@ -1,11 +1,14 @@
 # Python 3.11+
-numpy>=2.0
-opencv-python>=4.9        # includes cv2.aruco (calibration-sheet markers)
-scipy>=1.12
-shapely>=2.0
-trimesh>=4.0
-manifold3d>=3.0           # watertight bin geometry
-rembg>=2.0                # IS-Net background removal (downloads its model on first run)
-onnxruntime>=1.17
-matplotlib>=3.8           # calibration-sheet PDF generator
-pillow>=10.0
+numpy>=2.0,<3
+opencv-python>=4.9,<6     # includes cv2.aruco (calibration-sheet markers)
+scipy>=1.12,<2
+shapely>=2.0,<3
+trimesh>=4.0,<6
+manifold3d>=3.0,<4        # watertight bin geometry
+rembg>=2.0,<3             # IS-Net background removal (downloads its model on first run)
+onnxruntime>=1.17,<2
+matplotlib>=3.8,<4        # calibration-sheet PDF generator
+pillow>=10.0,<14
+pytest>=8,<10             # tests (tests/python)
+# Optional, not required: HEIC decoding off macOS (macOS converts HEIC with sips)
+# pillow-heif>=0.16,<2

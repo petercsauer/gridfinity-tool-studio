@@ -53,9 +53,10 @@ cells to fit the pocket. The 3D preview keeps your camera angle between rebuilds
 ## How it works
 
 `webapp/app.py` is a small Python server; `webapp/index.html` is the whole UI (Three.js for the 3D preview).
+The pipeline itself is the `gts` package in `src/gts/` (`sheet`, `trace`, `geometry`, `bin`).
 
 1. **Sheet:** ArUco markers (`cv2.aruco`, 4×4 dictionary) → homography to sheet millimetres
-   (`src/analyze_sheet.py`).
+   (`src/gts/sheet.py`).
 2. **Cut‑out:** [rembg](https://github.com/danielgatis/rembg) IS‑Net on the perspective‑corrected page, then
    again on a tight crop around the tool for precise edges.
 3. **Outline:** largest contour → smoothing spline → straightened to the tool's long axis.
@@ -67,12 +68,17 @@ cells to fit the pocket. The 3D preview keeps your camera angle between rebuilds
 
 | Path | Purpose |
 |---|---|
-| `src/sheetgen.py` | Regenerates the calibration sheet PDFs: `python3 src/sheetgen.py letter` or `a4` |
+| `src/gts/` | The reference pipeline as a package: sheet detection, tracing, pocket geometry, bin |
+| `src/sheetgen.py` | Regenerates the calibration sheet PDFs and marker metadata in `assets/sheet/`: `python3 src/sheetgen.py letter` or `a4` |
 | `src/analyze_rembg.py` | Command‑line version of the trace pipeline for a single photo |
 | `src/gridfinity_bin.py`, `src/holder.py`, `src/pack.py` | Command‑line bin, pocket and multi‑tool layout generators |
 | `src/gf_build_all.py`, `src/gridfinity.fs.tmpl`, `src/onshape.py` | Builds the bins as a parametric Onshape FeatureScript feature (needs an Onshape API key in `~/.onshape_key`) |
 | `docs/design-spec.md` | Design spec for the UI |
-| `assets/presets/` | Photos the four built‑in demo tools were traced from |
+| `assets/presets/` | The four built‑in demo tools: photo (`<tool>.jpg`), rectified image (`<tool>_rect.png`) and mask (`<tool>_mask.png`) |
+| `assets/sheet/` | Calibration sheet PDFs, preview and `sheet_markers.json` (marker positions in mm) |
+| `tests/python/` | Tests: `python3 -m pytest -q` |
+
+The command‑line tools write their generated files to `out/`, which is not tracked.
 
 ## License
 

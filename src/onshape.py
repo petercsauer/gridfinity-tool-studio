@@ -5,7 +5,7 @@ Base: cad.onshape.com /api/v10."""
 import os, json, base64, urllib.request, urllib.error
 
 BASE="https://cad.onshape.com/api/v10"
-_key=open(os.path.expanduser("~/.onshape_key")).read().strip()
+_key=open(os.path.expanduser("~/.onshape_key"),encoding="utf-8").read().strip()
 _auth="Basic "+base64.b64encode(_key.encode()).decode()
 
 def req(method, path, body=None, headers=None):

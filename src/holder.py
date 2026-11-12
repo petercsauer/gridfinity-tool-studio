@@ -2,8 +2,8 @@
 """Pocket layout per tool: 1.5 mm clearance ring + a 25 mm finger slot cut
 across, over a crop of the real (rectified) photo so the fit is eyeballable.
 Symmetric tools are mirror-averaged about their long axis first. Rebuilds base
-outline svg/dxf/npy + pocket svg + preview PNG from the rectified frames and
-rembg mattes. Run with -I.
+outline svg/dxf/npy + pocket svg + preview PNG (in out/) from the preset
+rectified frames and rembg mattes in assets/presets/. Run with -I.
   photo crop (bg)   blue = tool outline   red = clearance ring + finger slot
 """
 import os, sys, numpy as np, cv2
@@ -13,6 +13,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
 import analyze_sheet as A
+from gts.trace import preset_paths
 
 OUT=A.OUT; PX=A.SCALE                      # 8 px/mm
 TOOLS=["needlenose","combopliers","flushcutter","stripper"]
@@ -63,8 +64,9 @@ xy=lambda g: np.array(g.exterior.coords)
 
 fig,axes=plt.subplots(1,4,figsize=(16,7.5))
 for ax,name in zip(axes,TOOLS):
-    bg=cv2.imread(os.path.join(OUT,f"rectified_{name}.png"))
-    mask=cv2.imread(os.path.join(OUT,f"rembgmask_{name}.png"),cv2.IMREAD_GRAYSCALE)
+    _,rect_png,mask_png=preset_paths(name)
+    bg=cv2.imread(rect_png)
+    mask=cv2.imread(mask_png,cv2.IMREAD_GRAYSCALE)
     bg,mask=upright(bg,mask)
     if SYM[name]: mask=symmetrize_px(mask)
     P=outline_px(mask)                                  # px, upright crop frame
@@ -76,7 +78,7 @@ for ax,name in zip(axes,TOOLS):
     np.save(os.path.join(OUT,f"{name}_toolref.npy"),tcs)
     dp="M "+" L ".join(f"{a:.2f},{b:.2f}" for a,b in pcs)+" Z"
     dt="M "+" L ".join(f"{a:.2f},{b:.2f}" for a,b in tcs)+" Z"
-    open(os.path.join(OUT,f"{name}_pocket.svg"),"w").write(
+    open(os.path.join(OUT,f"{name}_pocket.svg"),"w",encoding="utf-8").write(
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:.2f}mm" height="{h:.2f}mm" '
         f'viewBox="-2 -2 {w+4:.2f} {h+4:.2f}">'
         f'<path d="{dp}" fill="#fde0e0" stroke="#d81f1f" stroke-width="0.5"/>'

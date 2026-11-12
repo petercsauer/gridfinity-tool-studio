@@ -4,7 +4,7 @@
 Run with -I:  python3 stl_block.py flushcutter [--margin 4] [--out <path>]
 """
 import sys, os, numpy as np, trimesh
-from manifold3d import Manifold, CrossSection, FillRule
+from manifold3d import CrossSection, FillRule
 
 OUT=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),"out")
 IN=25.4; H=0.5*IN; FLOOR=0.1*IN; MARGIN=4.0

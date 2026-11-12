@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """Generate a print-at-100% Letter calibration sheet with 4 ArUco markers at
 known mm positions + light mm/inch grid + rulers. Outputs PDF (exact scale),
-PNG preview, and sheet_markers.json (marker corner coords in mm) for analysis.
-Run with -I."""
-import os, json, numpy as np, cv2
+PNG preview, and sheet_markers.json (marker corner coords in mm) for analysis,
+into assets/sheet/ by default. The marker layout is identical for both sizes.
+Run with -I:  python3 sheetgen.py [letter|a4] [--out-dir DIR]"""
+import os, sys, json, numpy as np, cv2
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-OUT=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),"out")
-import sys
-PAGES={'letter':(215.9,279.4),'a4':(210.0,297.0)}
-SIZE=sys.argv[1] if len(sys.argv)>1 else 'letter'
-PW,PH=PAGES[SIZE]                    # page size mm (marker layout identical across sizes)
+SHEET_DIR=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),"assets","sheet")
+PAGES={'letter':(215.9,279.4),'a4':(210.0,297.0)}   # page size mm
 MARK=24.0                            # marker edge mm
 # marker centers (mm from top-left) and ids
 CENTERS=[(30,34,0),(185.9,34,1),(185.9,245.4,2),(30,245.4,3)]
@@ -23,7 +21,14 @@ def marker_corners_mm(cx,cy):
     # TL,TR,BR,BL in mm (image/page coords, y down)
     return [(cx-h,cy-h),(cx+h,cy-h),(cx+h,cy+h),(cx-h,cy+h)]
 
-def main():
+def meta():
+    """Marker metadata: identical for every page size."""
+    return {"pages":{k:list(v) for k,v in PAGES.items()},"marker_edge_mm":MARK,"dict":"DICT_4X4_50",
+            "markers":{mid:marker_corners_mm(cx,cy) for cx,cy,mid in CENTERS}}
+
+def main(size="letter", out_dir=SHEET_DIR):
+    PW,PH=PAGES[size]
+    os.makedirs(out_dir,exist_ok=True)
     d=cv2.aruco.getPredefinedDictionary(DICT)
     fig=plt.figure(figsize=(PW/25.4,PH/25.4))
     ax=fig.add_axes([0,0,1,1]); ax.set_xlim(0,PW); ax.set_ylim(PH,0)  # y down
@@ -82,14 +87,17 @@ def main():
     ax.text(bx+50,by-2.5,'100.0 mm  (measure after printing to confirm scale)',ha='center',va='bottom',fontsize=6)
     ax.text(bx+50,by+4,'=  3.937 in',ha='center',va='top',fontsize=5,color='0.4')
 
-    fig.savefig(os.path.join(OUT,f"calibration_sheet_{SIZE}.pdf"))
-    if SIZE=="letter": fig.savefig(os.path.join(OUT,"calibration_sheet.pdf"))
-    fig.savefig(os.path.join(OUT,f"calibration_sheet_{SIZE}_preview.png"),dpi=150)
-    print(f"wrote out/calibration_sheet_{SIZE}.pdf + preview")
+    pdf=os.path.join(out_dir,f"calibration_sheet_{size}.pdf")
+    fig.savefig(pdf)
+    if size=="letter": fig.savefig(os.path.join(out_dir,"calibration_sheet_letter_preview.png"),dpi=150)
+    plt.close(fig)
+    print(f"wrote {pdf}"+(" + preview" if size=="letter" else ""))
 
-    meta={"page_mm":[PW,PH],"marker_edge_mm":MARK,"dict":"DICT_4X4_50",
-          "markers":{mid:marker_corners_mm(cx,cy) for cx,cy,mid in CENTERS}}
-    json.dump(meta,open(os.path.join(OUT,"sheet_markers.json"),"w"),indent=1)
-    print("wrote out/sheet_markers.json")
+    path=os.path.join(out_dir,"sheet_markers.json")
+    with open(path,"w",encoding="utf-8") as f: json.dump(meta(),f,indent=1)
+    print(f"wrote {path}")
 
-if __name__=="__main__": main()
+if __name__=="__main__":
+    a=sys.argv[1:]; out_dir=SHEET_DIR
+    if "--out-dir" in a: i=a.index("--out-dir"); out_dir=a[i+1]; del a[i:i+2]
+    main(a[0] if a else "letter", out_dir)

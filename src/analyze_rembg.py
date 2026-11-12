@@ -28,6 +28,7 @@ def main():
                 post_process_mask=True)      # single-channel alpha/mask
     mask=np.asarray(mask)
     if mask.ndim==3: mask=mask[:,:,0]
+    os.makedirs(A.OUT,exist_ok=True)
     cv2.imwrite(os.path.join(A.OUT,f"rembgmask_{base}.png"),mask)
     m=(mask>thr).astype(np.uint8)*255
     m=cv2.morphologyEx(m,cv2.MORPH_OPEN,np.ones((5,5),np.uint8))
