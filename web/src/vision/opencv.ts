@@ -6,17 +6,29 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type CV = any;
 
-let loading: Promise<CV> | null = null;
+let loading: Promise<{ cv: CV }> | null = null;
 
-export function getCv(): Promise<CV> {
-  if (!loading) {
-    loading = (async () => {
-      const mod = await import('@techstark/opencv-js');
-      let cv: CV = (mod as { default?: unknown }).default ?? mod;
-      if (cv instanceof Promise) cv = await cv;
-      else if (!cv.Mat) await new Promise<void>((resolve) => { cv.onRuntimeInitialized = () => resolve(); });
-      return cv;
-    })();
+const isNode = typeof process !== 'undefined' && !!process.versions?.node && typeof (globalThis as { document?: unknown }).document === 'undefined'
+  && typeof (globalThis as { importScripts?: unknown }).importScripts === 'undefined';
+
+async function loadModule(): Promise<CV> {
+  if (isNode) {
+    // Vitest's ESM interop awaits CommonJS exports, and opencv.js's export has a `then`; plain require avoids that.
+    const spec = 'node:module';
+    const { createRequire } = await import(/* @vite-ignore */ spec);
+    return createRequire(import.meta.url)('@techstark/opencv-js');
   }
-  return loading;
+  const { box } = await import('./cv-entry');   // bundled by Vite into the worker chunk
+  return box.cv;
+}
+
+export async function getCv(): Promise<CV> {
+  loading ??= (async () => {
+    const cv: CV = await loadModule();
+    if (!cv.Mat) await new Promise<void>((resolve) => { cv.onRuntimeInitialized = () => resolve(); });
+    // Emscripten modules are thenables; resolving a promise with one would loop. Drop `then` once ready.
+    if (typeof cv.then === 'function') delete cv.then;
+    return { cv };
+  })();
+  return (await loading).cv;
 }
