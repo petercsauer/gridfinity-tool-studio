@@ -2,15 +2,18 @@
 // Mirrors genbin in src/gts/bin.py (kennetek standard.scad dimensions).
 import type { CrossSection, Manifold, ManifoldToplevel } from 'manifold-3d';
 import { GAP, GRID, HOLE_FROM_SIDE, MAGNET_D, MAGNET_H, SCREW_D, SCREW_H, UHT } from './constants';
-import { ccw, floorMin, recess, signedArea, type HoleStyle, type Ring, type Vec2 } from './pocket';
+import { baseHoles, ccw, floorMin, recess, signedArea, type HoleStyle, type Ring, type Vec2 } from './pocket';
 
-/** Top radius of the outer wall and the foot pads (bottom, middle, top sizes and radii). */
+/** Top radius of the outer wall and the foot pads (bottom, middle, top sizes and radii). The pad sizes are
+ * for a 42 mm cell; a foot on a pitch of `p` mm is `GRID - p` smaller (20.5, 16.2 and 14.6 for 21 mm). */
 const R_TOP = 3.75;
 const PAD_BOT = 35.6;
 const R_BOT = 0.8;
 const PAD_MID = 37.2;
 const R_MID = 1.6;
 const PAD_TOP = 41.5;
+/** Foot pitch with half-grid feet. */
+const HALF = GRID / 2;
 /** Stacking-lip trough: rim and lead-in widths. */
 const RIM = 1.8;
 const LEAD = 1.4;
@@ -36,6 +39,8 @@ export interface BinParams {
   holesCorners?: boolean;
   /** Stacking lip on top (default on). */
   lip?: boolean;
+  /** One foot per 21 mm half cell (default off): `nx`/`ny` may then be x.5, and no holes are cut. */
+  halfGrid?: boolean;
 }
 
 export interface BinMesh {
@@ -93,21 +98,30 @@ export function genbinManifold(
     const frustum = (a: number, ra: number, z0: number, b: number, rb: number, z1: number): Manifold =>
       s.keep(Manifold.hull([slab(rr(a, a, ra), z0, z0 + 0.02), slab(rr(b, b, rb), z1 - 0.02, z1)]));
 
+    const pitch = p.halfGrid ? HALF : GRID;
+    const fx = Math.round((nx * GRID) / pitch);
+    const fy = Math.round((ny * GRID) / pitch);
+    if (Math.abs(fx * pitch - nx * GRID) > 1e-9 || Math.abs(fy * pitch - ny * GRID) > 1e-9 || fx < 1 || fy < 1) {
+      throw new Error(`A ${nx}×${ny} bin needs ${p.halfGrid ? 'whole or half' : 'whole'} grid cells.`);
+    }
     const top = p.u * UHT;
     const Dx = GRID * nx - GAP;
     const Dy = GRID * ny - GAP;
     const recessZ = top - recess(p); // the pocket opens at the lip trough floor (or the top, lip off)
     const floorTop = Math.max(floorMin(p), recessZ - p.depth);
 
+    // same vertical profile and radii at any pitch; only the pad sizes shrink with it
+    const shrink = GRID - pitch;
+    const bot = PAD_BOT - shrink, mid = PAD_MID - shrink, padTop = PAD_TOP - shrink;
     const foot = s.keep(Manifold.union([
-      frustum(PAD_BOT, R_BOT, 0, PAD_MID, R_MID, 0.8),
-      slab(rr(PAD_MID, PAD_MID, R_MID), 0.8, 2.6),
-      frustum(PAD_MID, R_MID, 2.6, PAD_TOP, R_TOP, 4.75),
+      frustum(bot, R_BOT, 0, mid, R_MID, 0.8),
+      slab(rr(mid, mid, R_MID), 0.8, 2.6),
+      frustum(mid, R_MID, 2.6, padTop, R_TOP, 4.75),
     ]));
     const parts: Manifold[] = [slab(rr(Dx, Dy, R_TOP), 4.75, top)];
-    for (let i = 0; i < nx; i++) {
-      for (let j = 0; j < ny; j++) {
-        parts.push(s.keep(foot.translate([(i + 0.5) * GRID - (GRID * nx) / 2, (j + 0.5) * GRID - (GRID * ny) / 2, 0])));
+    for (let i = 0; i < fx; i++) {
+      for (let j = 0; j < fy; j++) {
+        parts.push(s.keep(foot.translate([(i + 0.5) * pitch - (pitch * fx) / 2, (j + 0.5) * pitch - (pitch * fy) / 2, 0])));
       }
     }
     const solid = s.keep(Manifold.union(parts));
@@ -117,7 +131,8 @@ export function genbinManifold(
       slab(rr(Dx - 2 * RIM, Dy - 2 * RIM, Math.max(0.3, R_TOP - RIM)), top - 3, top + 1),
     ]));
     // base holes, open at the bottom of each foot: a magnet pocket and/or a screw hole per cell corner
-    const holes = p.holes ?? 'none';
+    // (none with half-grid feet: the 8 mm-from-side positions don't fit on their 20.5 mm pads)
+    const holes = baseHoles(p);
     const holeCutters: Manifold[] = [];
     if (holes !== 'none') {
       const cyl = (d: number, h: number) => s.keep(s.keep(Manifold.cylinder(h + 0.01, d / 2, d / 2, HOLE_SEGMENTS)).translate([0, 0, -0.01]));

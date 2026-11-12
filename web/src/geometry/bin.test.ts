@@ -246,3 +246,96 @@ describe('slider race', () => {
     expect(c.isCurrent('build', (sent[2] as Request<'build'>).version)).toBe(true);
   });
 });
+
+describe('half-grid feet', () => {
+  const disc: Ring = Array.from({ length: 64 }, (_, k) => [8 * Math.cos((k * Math.PI) / 32), 5 * Math.sin((k * Math.PI) / 32)]);
+  const base: BinParams = { u: 3, depth: 6, fillet: 1, bfillet: 0, halfGrid: true };
+  /** Checks the bin is one valid solid; returns its feet (the parts below 4.7 mm), size and volume. */
+  const feet = (p: BinParams, nx: number, ny: number) => {
+    const { bin } = genbinManifold(m, disc, nx, ny, p);
+    try {
+      expect(bin.status()).toBe('NoError');
+      expect(bin.genus()).toBe(0);
+      const parts = bin.decompose();
+      expect(parts.length).toBe(1);
+      parts.forEach((x) => x.delete());
+      const low = bin.trimByPlane([0, 0, -1], -4.7);
+      const pads = low.decompose();
+      const boxes = pads.map((x) => x.boundingBox());
+      pads.forEach((x) => x.delete());
+      low.delete();
+      const box = bin.boundingBox();
+      return { count: pads.length, boxes, volume: bin.volume(), size: [box.max[0] - box.min[0], box.max[1] - box.min[1]] };
+    } finally {
+      bin.delete();
+    }
+  };
+
+  it.each([
+    [1.5, 2, 12],
+    [0.5, 1, 2],
+    [1, 1, 4],
+    [2.5, 1.5, 15],
+  ])('a %s x %s bin is one valid solid with a foot per 21 mm half cell (%s feet)', (nx, ny, n) => {
+    const r = feet(base, nx, ny);
+    expect(r.count).toBe(n);
+    expect(r.size[0]).toBeCloseTo(42 * nx - 0.5, 3);
+    expect(r.size[1]).toBeCloseTo(42 * ny - 0.5, 3);
+    for (const b of r.boxes) {
+      // just under the 20.5 mm pad top (the cut is 0.05 mm below it)
+      expect(b.max[0] - b.min[0]).toBeGreaterThan(20.3);
+      expect(b.max[0] - b.min[0]).toBeLessThan(20.5);
+      expect(b.min[2]).toBeCloseTo(0, 6);
+    }
+    expect(liveObjects()).toBe(0);
+  });
+
+  it('puts four half-grid feet where a full-grid bin has one, same outer size, less material', () => {
+    const half = feet(base, 2, 1);
+    const full = feet({ ...base, halfGrid: false }, 2, 1);
+    expect(full.count).toBe(2);
+    expect(half.count).toBe(8);
+    expect(half.size[0]).toBeCloseTo(full.size[0]!, 6);
+    expect(half.size[1]).toBeCloseTo(full.size[1]!, 6);
+    expect(half.volume).toBeLessThan(full.volume);
+  });
+
+  it('cuts no base holes and keeps the usual pocket floor', () => {
+    const plain = feet(base, 1.5, 1);
+    for (const holes of ['magnet', 'screw', 'both'] as const) {
+      expect(feet({ ...base, holes, holesCorners: true }, 1.5, 1).volume).toBeCloseTo(plain.volume, 3);
+      expect(feet({ ...base, holes }, 1.5, 1).volume).toBeCloseTo(plain.volume, 3);
+    }
+    const deep = genbin(m, disc, 1.5, 1, { ...base, depth: 40, holes: 'screw' });
+    expect(deep.effectiveDepth).toBeCloseTo(maxDepth(3), 6);
+  });
+
+  it('refuses half cells without half-grid feet', () => {
+    expect(() => genbinManifold(m, disc, 1.5, 1, { ...base, halfGrid: false })).toThrow(/whole/);
+    expect(liveObjects()).toBe(0);
+  });
+
+  it('is sized and built by the build handler', async () => {
+    const deps: Deps = { manifold: m, presets: diskPresets };
+    const fx = presetFixture('needlenose');
+    const params = { ...DEFAULTS, ...fx.params, tool: 'needlenose' };
+    const whole = await build(params, deps);
+    const half = await build({ ...params, halfGrid: true }, deps);
+    expect(Number.isInteger(whole.nx) && Number.isInteger(whole.ny)).toBe(true);
+    expect(Number.isInteger(half.nx * 2) && Number.isInteger(half.ny * 2)).toBe(true);
+    expect(half.nx).toBeLessThanOrEqual(whole.nx);
+    expect(half.ny).toBeLessThanOrEqual(whole.ny);
+    expect(half.nx).toBeGreaterThan(whole.nx - 1);
+    expect(half.ny).toBeGreaterThan(whole.ny - 1);
+  });
+
+  it('refuses a half-grid footprint over 16 half cells', async () => {
+    const huge = await diskPresets.get('needlenose');
+    const scaled = (P: Ring): Ring => P.map(([x, y]) => [x * 2.2, y * 2.2]);
+    const big: Deps = {
+      manifold: m,
+      presets: { ...diskPresets, get: async () => ({ ...huge, outline_mm: scaled(huge.outline_mm), symmetric_outline_mm: scaled(huge.symmetric_outline_mm) }) },
+    };
+    await expect(build({ ...DEFAULTS, tool: 'needlenose', halfGrid: true }, big)).rejects.toMatchObject({ code: 'too-large' });
+  });
+});

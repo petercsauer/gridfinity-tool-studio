@@ -10,7 +10,7 @@ import { segment } from '../../vision/segment';
 import { detectSheet, rectRegion, renderSheetView, SHEET, SheetError, type Box, type Homography, type Point, type RGBAImage } from '../../vision/sheet';
 import { symmetrize } from '../../vision/symmetry';
 import type { Deps } from '../deps';
-import { PipelineError, type UploadResult } from '../protocol';
+import { isOutOfMemory, memoryError, PipelineError, type UploadResult } from '../protocol';
 
 /** Working scale of the rectified canvases (px per mm), as in Python. */
 const PX = 8;
@@ -35,7 +35,16 @@ export interface UploadEnv {
 export function workerUploadEnv(onProgress?: Progress, stage?: UploadEnv['stage']): UploadEnv {
   return {
     stage,
-    segment: async (img) => segment(await getSession(onProgress), img),
+    // model failures (download, session, inference) get their own code; running out of memory gets 'memory'
+    segment: async (img) => {
+      try {
+        return await segment(await getSession(onProgress), img);
+      } catch (e) {
+        if (isOutOfMemory(e)) throw memoryError();
+        if (e instanceof PipelineError) throw e;
+        throw new PipelineError('model', `The background-removal model couldn't run: ${String(e)}`);
+      }
+    },
     async encodeJpeg({ data, width, height }) {
       const canvas = new OffscreenCanvas(width, height);
       const ctx = canvas.getContext('2d');

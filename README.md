@@ -53,10 +53,15 @@ which takes some seconds per photo.
 | Holes | Base holes per gridfinity cell corner: 6×2 mm magnets (6.5 × 2.4 mm), M3 screws (3 × 6 mm) or both |
 | Corners only | Puts the holes only at the bin's four outer corners |
 | Stacking lip | The rim that lets bins stack; off gives a flat top and 4.4 mm more pocket depth |
+| Half-grid feet | One foot per 21 mm half cell, so the footprint grows in half cells (1.5, 2.5… units). The bin still sits on a standard 42 mm baseplate; base holes are off, since they don't fit on the smaller feet |
 
 Bins use the standard gridfinity 42 mm grid, base profile and stacking lip, and the footprint grows in whole
-cells to fit the pocket. Screw holes raise the lowest pocket floor to 6.8 mm so the pocket can't break into
-them. The 3D preview keeps your camera angle between rebuilds; double‑click it to re‑frame.
+cells (or half cells, with half-grid feet) to fit the pocket. Screw holes raise the lowest pocket floor to
+6.8 mm so the pocket can't break into them. The 3D preview keeps your camera angle between rebuilds;
+double‑click it to re‑frame.
+
+The trace shows the pocket's width and length as dimension lines, measured along the tool's own axes. The
+pocket and tool sizes are also listed under the Pocket settings.
 
 **Trace outline › SVG / DXF** saves the traced outline and the pocket (clearance plus finger slot) at 1:1 in
 millimetres, on separate layers, for laser‑cutting foam inserts or drawing your own bin in CAD. DXF is R12,
@@ -80,7 +85,7 @@ The app in `web/` is a static site (Vite + TypeScript). The UI is `web/index.htm
    (`web/src/geometry/bin.ts`). Three.js draws the preview.
 
 The Python package in `src/gts/` is the reference implementation the browser port was checked against; the
-JSON fixtures in `tests/fixtures/` pin the two to the same results. Base holes and the lip toggle exist only in
+JSON fixtures in `tests/fixtures/` pin the two to the same results. Base holes, the lip toggle and half-grid feet exist only in
 the browser app.
 
 ## Developing the web app

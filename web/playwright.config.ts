@@ -3,7 +3,8 @@
 // or PW_BUNDLED_CHROMIUM=1 to use Playwright's own Chromium (e.g. in CI after `npx playwright install chromium`).
 import { defineConfig } from '@playwright/test';
 
-const PORT = 4175;
+// PW_PORT moves the local server when 4175 is taken
+const PORT = Number(process.env.PW_PORT ?? 4175);
 // BASE_URL points the tests at a deployed site (e2e/live.spec.ts); then no local server is started
 const BASE_URL = process.env.BASE_URL;
 const chrome = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';

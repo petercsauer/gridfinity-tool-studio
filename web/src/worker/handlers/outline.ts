@@ -1,8 +1,9 @@
 // The 2D trace: tool and pocket in the rotated outline frame (for sizing) and on the sheet.
-import { effectiveDepth, footprint, makePocket, maxDepth, rotate, type Ring, type Vec2 } from '../../geometry/pocket';
+import { bounds, effectiveDepth, footprint, makePocket, maxDepth, rotate, type Ring, type Vec2 } from '../../geometry/pocket';
 import { clampParams, type Params } from '../../params';
 import type { Deps } from '../deps';
-import type { OutlineResult } from '../protocol';
+import type { Measurements, OutlineResult } from '../protocol';
+import type { Affine } from '../../vision/outline';
 
 const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;
 
@@ -18,6 +19,23 @@ function axisSegment(P: Ring, { deg, offset, centre: [cx, cy] }: { deg: number; 
   return rotate(ends, deg).map(([x, y]): Vec2 => [x + cx, y + cy]);
 }
 
+/** Pocket and tool boxes in the upright frame, their sizes and the gap between them on each side. */
+export function measure(tool: Ring, pocket: Ring, up2sheet: Affine): Measurements {
+  const t = bounds(tool);
+  const k = bounds(pocket);
+  return {
+    pocket: k,
+    tool: t,
+    up2sheet,
+    pocketSize: [round(k.xmax - k.xmin, 1), round(k.ymax - k.ymin, 1)],
+    toolSize: [round(t.xmax - t.xmin, 1), round(t.ymax - t.ymin, 1)],
+    gaps: {
+      xmin: round(t.xmin - k.xmin, 1), xmax: round(k.xmax - t.xmax, 1),
+      ymin: round(t.ymin - k.ymin, 1), ymax: round(k.ymax - t.ymax, 1),
+    },
+  };
+}
+
 export async function outline(raw: Params, { manifold, presets }: Deps): Promise<OutlineResult> {
   const p = clampParams(raw);
   const preset = await presets.get(p.tool);
@@ -25,7 +43,7 @@ export async function outline(raw: Params, { manifold, presets }: Deps): Promise
   const { tool, pocket } = makePocket(manifold, rotate(P0, p.rot), p);
   // the sheet shows the tool where it lies on the paper, so its pocket is made unrotated
   const onSheet = p.rot === 0 ? { tool, pocket } : makePocket(manifold, P0, p);
-  const [nx, ny] = footprint(pocket, p.fillet);
+  const [nx, ny] = footprint(pocket, p.fillet, p.halfGrid);
   const xs = pocket.map((q) => q[0]);
   const ys = pocket.map((q) => q[1]);
   return {
@@ -45,5 +63,6 @@ export async function outline(raw: Params, { manifold, presets }: Deps): Promise
     maxDepth: maxDepth(p.u, p),
     effectiveDepth: effectiveDepth(p.u, p.depth, p),
     symmetryScore: preset.symmetry_score,
+    measure: measure(onSheet.tool, onSheet.pocket, preset.up2sheet),
   };
 }

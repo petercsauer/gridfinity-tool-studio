@@ -18,6 +18,8 @@ export interface Params {
   holes: HoleStyle;
   holesCorners: boolean;
   lip: boolean;
+  /** Feet on a 21 mm half-grid, so the footprint grows in half cells (no base holes then). */
+  halfGrid: boolean;
 }
 
 export const HOLE_STYLES: readonly HoleStyle[] = ['none', 'magnet', 'screw', 'both'];
@@ -27,6 +29,7 @@ type NumericKey = { [K in keyof Params]: Params[K] extends number ? K : never }[
 export const DEFAULTS: Params = {
   tool: 'groovejoint', sym: false, clearance: 2.5, rot: 0, slotOn: true, slotR: 12.5, slotOver: 6,
   slotFrac: 0.4, u: 3, depth: 10, fillet: 3.175, bfillet: 0, holes: 'none', holesCorners: false, lip: true,
+  halfGrid: false,
 };
 
 /** Allowed [min, max] of every numeric parameter. */
@@ -42,7 +45,7 @@ export const RANGES: Record<NumericKey, readonly [number, number]> = {
   bfillet: [0, 4],
 };
 
-/** Largest bin footprint, in grid cells per axis. */
+/** Largest bin footprint, in grid cells per axis (8 whole cells, or 16 half cells with half-grid feet). */
 export const MAX_CELLS = 8;
 
 export function clamp(v: number, lo: number, hi: number): number {
@@ -58,6 +61,7 @@ export function clampParams(p: Params): Params {
     holes: HOLE_STYLES.includes(p.holes) ? p.holes : DEFAULTS.holes,
     holesCorners: !!p.holesCorners,
     lip: p.lip === undefined ? DEFAULTS.lip : !!p.lip,
+    halfGrid: !!p.halfGrid,
   };
   for (const key of Object.keys(RANGES) as NumericKey[]) {
     const [lo, hi] = RANGES[key];

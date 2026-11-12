@@ -6,7 +6,7 @@ import { outline } from './handlers/outline';
 import { upload, workerUploadEnv } from './handlers/upload';
 import type { Deps } from './deps';
 import { fetchPresets, withUploads, type ToolSource } from './presets';
-import { PipelineError, type ProgressMessage, type Request, type Response, type Results } from './protocol';
+import { isOutOfMemory, memoryError, PipelineError, type ProgressMessage, type Request, type Response, type Results } from './protocol';
 
 interface WorkerScope {
   postMessage(message: unknown, transfer?: Transferable[]): void;
@@ -64,7 +64,8 @@ scope.addEventListener('message', async ({ data: req }) => {
     const result = await handle(req);
     res = { id, kind, version, ok: true, result } as Response;
   } catch (e) {
-    const err = e instanceof PipelineError ? e : new PipelineError('internal', `Processing failed: ${String(e)}`);
+    const err = e instanceof PipelineError ? e
+      : isOutOfMemory(e) ? memoryError() : new PipelineError('internal', `Processing failed: ${String(e)}`);
     res = { id, kind, version, ok: false, code: err.code, error: err.message } as Response;
   }
   scope.postMessage(res, res.ok ? transferables(res.result) : []);

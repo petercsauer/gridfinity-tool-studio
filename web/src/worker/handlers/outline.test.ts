@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { initManifold } from '../../geometry/manifold';
+import { bounds, makePocket } from '../../geometry/pocket';
 import { hausdorff, presetFixture, TOOLS } from '../../test/fixtures';
 import { DEFAULTS } from '../../params';
 import type { Deps } from '../deps';
@@ -68,6 +69,57 @@ describe('outline handler parameters', () => {
     expect(r.pocket).toEqual(ref.pocket);
     expect(r.effectiveDepth).toBeCloseTo(46.05, 10);
     expect(r.maxDepth).toBeCloseTo(46.05, 10);
+  });
+
+  it.each(TOOLS)('measures the %s pocket and tool along the upright axes', async (tool) => {
+    const fx = presetFixture(tool);
+    const params = { ...DEFAULTS, ...fx.params, tool, rot: 30 };
+    const r = await outline(params, deps);
+    const m = r.measure!;
+    // the unrotated rings, in the upright frame
+    const P0 = params.sym ? fx.symmetric_outline_mm : fx.outline_mm;
+    const { tool: t, pocket: k } = makePocket(deps.manifold, P0, params);
+    const tb = bounds(t), kb = bounds(k);
+    expect(m.up2sheet).toEqual(fx.up2sheet);
+    for (const key of ['xmin', 'xmax', 'ymin', 'ymax'] as const) {
+      expect(m.pocket[key]).toBeCloseTo(kb[key], 6);
+      expect(m.tool[key]).toBeCloseTo(tb[key], 6);
+    }
+    expect(m.pocketSize[0]).toBeCloseTo(kb.xmax - kb.xmin, 1);
+    expect(m.pocketSize[1]).toBeCloseTo(kb.ymax - kb.ymin, 1);
+    expect(m.toolSize[0]).toBeCloseTo(tb.xmax - tb.xmin, 1);
+    expect(m.toolSize[1]).toBeCloseTo(tb.ymax - tb.ymin, 1);
+    expect(m.gaps.xmin).toBeCloseTo(tb.xmin - kb.xmin, 1);
+    expect(m.gaps.xmax).toBeCloseTo(kb.xmax - tb.xmax, 1);
+    expect(m.gaps.ymin).toBeCloseTo(tb.ymin - kb.ymin, 1);
+    expect(m.gaps.ymax).toBeCloseTo(kb.ymax - tb.ymax, 1);
+    // the pocket box contains the tool box; the slot only widens it across the tool
+    for (const g of Object.values(m.gaps)) expect(g).toBeGreaterThanOrEqual(params.clearance - 0.05);
+    // the box mapped to the sheet holds the sheet pocket
+    const [[a, b, c], [d, e, f]] = m.up2sheet;
+    const back = (q: [number, number]) => {
+      // invert the rigid map: A is a rotation (det 1), so A^-1 = A^T
+      const x = q[0] - c, y = q[1] - f;
+      return [a * x + d * y, b * x + e * y] as [number, number];
+    };
+    for (const q of r.sheetPocket) {
+      const [x, y] = back(q);
+      expect(x).toBeGreaterThanOrEqual(m.pocket.xmin - 0.02);
+      expect(x).toBeLessThanOrEqual(m.pocket.xmax + 0.02);
+      expect(y).toBeGreaterThanOrEqual(m.pocket.ymin - 0.02);
+      expect(y).toBeLessThanOrEqual(m.pocket.ymax + 0.02);
+    }
+  });
+
+  it('gives a half-grid footprint in half cells', async () => {
+    const whole = await outline({ ...NEEDLENOSE }, deps);
+    const half = await outline({ ...NEEDLENOSE, halfGrid: true }, deps);
+    expect(Number.isInteger(half.nx * 2) && Number.isInteger(half.ny * 2)).toBe(true);
+    expect(half.nx).toBeLessThanOrEqual(whole.nx);
+    expect(half.pocket).toEqual(whole.pocket);
+    expect(half.maxDepth).toBeCloseTo(whole.maxDepth, 9);
+    const screws = await outline({ ...NEEDLENOSE, holes: 'screw', halfGrid: true }, deps);
+    expect(screws.maxDepth).toBeCloseTo(whole.maxDepth, 9);
   });
 
   it('rejects unknown tools with a typed error', async () => {
