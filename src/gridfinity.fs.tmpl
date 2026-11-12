@@ -1,0 +1,141 @@
+FeatureScript 3112;
+import(path : "onshape/std/common.fs", version : "3112.0");
+
+// ===== gridfinity constants (kennetek standard.scad) =====
+const CELL = 42 * millimeter;
+const GAP  = 0.5 * millimeter;
+const R_TOP = 3.75 * millimeter;
+
+const HEIGHT_U_BOUNDS = { (unitless) : [1, 3, 30] } as IntegerBoundSpec;
+const FLOOR_BOUNDS  = { (millimeter) : [0.4, 2.25, 50] } as LengthBoundSpec;
+const FILLET_BOUNDS = { (millimeter) : [0.0, 3.175, 20] } as LengthBoundSpec;
+
+// closed tool-pocket outline (mm), centred on origin. __POINTS__ injected.
+const NX = __NX__;
+const NY = __NY__;
+const POCKET = [ __POINTS__ ];
+
+// rounded rectangle (centred) made of 4 lines + 4 three-point arcs
+function rrect(sketch is Sketch, p is string, w is ValueWithUnits, h is ValueWithUnits, r is ValueWithUnits)
+{
+    const hw = w/2; const hh = h/2; const d = r * 0.7071067811865;
+    skLineSegment(sketch, p ~ "lb", { "start" : vector(-(hw-r), -hh), "end" : vector(hw-r, -hh) });
+    skLineSegment(sketch, p ~ "le", { "start" : vector(hw, -(hh-r)),  "end" : vector(hw, hh-r) });
+    skLineSegment(sketch, p ~ "lt", { "start" : vector(hw-r, hh),     "end" : vector(-(hw-r), hh) });
+    skLineSegment(sketch, p ~ "ll", { "start" : vector(-hw, hh-r),    "end" : vector(-hw, -(hh-r)) });
+    skArc(sketch, p ~ "abr", { "start" : vector(hw-r, -hh),    "mid" : vector(hw-r+d, -(hh-r)-d),    "end" : vector(hw, -(hh-r)) });
+    skArc(sketch, p ~ "atr", { "start" : vector(hw, hh-r),     "mid" : vector(hw-r+d, hh-r+d),       "end" : vector(hw-r, hh) });
+    skArc(sketch, p ~ "atl", { "start" : vector(-(hw-r), hh),  "mid" : vector(-(hw-r)-d, hh-r+d),    "end" : vector(-hw, hh-r) });
+    skArc(sketch, p ~ "abl", { "start" : vector(-hw, -(hh-r)), "mid" : vector(-(hw-r)-d, -(hh-r)-d), "end" : vector(-(hw-r), -hh) });
+}
+
+function rrSketch(context is Context, id is Id, name is string, z is ValueWithUnits,
+                  w is ValueWithUnits, h is ValueWithUnits, r is ValueWithUnits) returns Query
+{
+    var sk = newSketchOnPlane(context, id + name, { "sketchPlane" : plane(vector(0,0,1) * z, vector(0,0,1)) });
+    rrect(sk, "p", w, h, r);
+    skSolve(sk);
+    return qSketchRegion(id + name);
+}
+
+// one foot (lofted base pad), bottom at z=0, centred on origin
+function makeFoot(context is Context, id is Id)
+{
+    var r0 = rrSketch(context, id, "f0", 0.0*millimeter, 35.6*millimeter, 35.6*millimeter, 0.8*millimeter);
+    var r1 = rrSketch(context, id, "f1", 0.8*millimeter, 37.2*millimeter, 37.2*millimeter, 1.6*millimeter);
+    var r2 = rrSketch(context, id, "f2", 2.6*millimeter, 37.2*millimeter, 37.2*millimeter, 1.6*millimeter);
+    var r3 = rrSketch(context, id, "f3", 4.75*millimeter, 41.5*millimeter, 41.5*millimeter, R_TOP);
+    opLoft(context, id + "footLoft", { "profileSubqueries" : [r0, r1, r2, r3] });
+}
+
+annotation { "Feature Type Name" : "Gridfinity Tool Bin" }
+export const gridfinityToolBin = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Height (U)" } isInteger(definition.heightU, HEIGHT_U_BOUNDS);
+        annotation { "Name" : "Floor thickness" } isLength(definition.floor, FLOOR_BOUNDS);
+        annotation { "Name" : "Fillet radius" } isLength(definition.fillet, FILLET_BOUNDS);
+    }
+    {
+        const top = definition.heightU * 7 * millimeter;
+        const Dx = CELL * NX - GAP;
+        const Dy = CELL * NY - GAP;
+        const cx0 = -(NX - 1) / 2 * CELL;
+        const cy0 = -(NY - 1) / 2 * CELL;
+
+        // --- feet: build one at first cell, pattern to the rest
+        makeFoot(context, id + "foot");
+        var footBody = qCreatedBy(id + "foot" + "footLoft", EntityType.BODY);
+        opTransform(context, id + "footMove", { "bodies" : footBody, "transform" : transform(vector(cx0, cy0, 0.0*millimeter)) });
+        var txs = []; var names = [];
+        for (var i = 0; i < NX; i += 1) { for (var j = 0; j < NY; j += 1) {
+            if (i == 0 && j == 0) { continue; }
+            txs = append(txs, transform(vector(i * CELL, j * CELL, 0.0*millimeter)));
+            names = append(names, "c" ~ i ~ "x" ~ j);
+        }}
+        opPattern(context, id + "feetPat", { "entities" : footBody, "transforms" : txs, "instanceNames" : names });
+
+        // --- body
+        var bodyReg = rrSketch(context, id, "bodyS", 4.75*millimeter, Dx, Dy, R_TOP);
+        opExtrude(context, id + "bodyEx", { "entities" : bodyReg, "direction" : vector(0,0,1),
+                  "endBound" : BoundingType.BLIND, "endDepth" : top - 4.75*millimeter });
+
+        // --- union feet + body
+        opBoolean(context, id + "uni", { "tools" : qBodyType(qEverything(EntityType.BODY), BodyType.SOLID), "operationType" : BooleanOperationType.UNION });
+        var bin = qBodyType(qEverything(EntityType.BODY), BodyType.SOLID);
+
+        // --- stacking lip: standard gridfinity profile (0.7/1.8/1.9 mm), lofted cavity subtracted
+        //   inner wall inset 2.6 mm below lip, stepping out to full D at the top rim.
+        const recessZ = top - 4.4*millimeter;
+        var lp1 = rrSketch(context, id, "lp1", top - 4.4*millimeter, Dx - 5.2*millimeter, Dy - 5.2*millimeter, R_TOP - 2.6*millimeter);
+        var lp2 = rrSketch(context, id, "lp2", top - 3.7*millimeter, Dx - 3.8*millimeter, Dy - 3.8*millimeter, R_TOP - 1.9*millimeter);
+        var lp3 = rrSketch(context, id, "lp3", top - 1.9*millimeter, Dx - 3.8*millimeter, Dy - 3.8*millimeter, R_TOP - 1.9*millimeter);
+        var lp4 = rrSketch(context, id, "lp4", top,                  Dx,                   Dy,                   R_TOP);
+        var lp5 = rrSketch(context, id, "lp5", top + 1.0*millimeter,  Dx,                   Dy,                   R_TOP);
+        opLoft(context, id + "lipLoft", { "profileSubqueries" : [lp1, lp2, lp3, lp4, lp5] });
+        opBoolean(context, id + "lipCut", { "targets" : qSubtraction(bin, qCreatedBy(id + "lipLoft", EntityType.BODY)),
+                  "tools" : qCreatedBy(id + "lipLoft", EntityType.BODY), "operationType" : BooleanOperationType.SUBTRACTION });
+
+        // --- tool pocket (opens at the recess floor)
+        const floorTop = 4.75*millimeter + definition.floor;
+        var psk = newSketchOnPlane(context, id + "pocketS", { "sketchPlane" : plane(vector(0,0,1) * floorTop, vector(0,0,1)) });
+        if (definition.smoothPocket)
+        {
+            var pts = [];
+            for (var pp in POCKET) { pts = append(pts, vector(pp[0], pp[1]) * millimeter); }
+            skFitSpline(psk, "sp", { "points" : pts, "isPeriodic" : true });
+        }
+        else
+        {
+            const npk = size(POCKET);
+            for (var k = 0; k < npk; k += 1)
+            {
+                var k2 = k + 1; if (k2 == npk) { k2 = 0; }
+                skLineSegment(psk, "pl" ~ k, { "start" : vector(POCKET[k][0],  POCKET[k][1])  * millimeter,
+                                               "end"   : vector(POCKET[k2][0], POCKET[k2][1]) * millimeter });
+            }
+        }
+        skSolve(psk);
+        opExtrude(context, id + "pocketEx", { "entities" : qSketchRegion(id + "pocketS"), "direction" : vector(0,0,1),
+                  "endBound" : BoundingType.BLIND, "endDepth" : top - floorTop + 1.0*millimeter });
+        opBoolean(context, id + "pocketCut", { "targets" : qSubtraction(bin, qCreatedBy(id + "pocketEx", EntityType.BODY)),
+                  "tools" : qCreatedBy(id + "pocketEx", EntityType.BODY), "operationType" : BooleanOperationType.SUBTRACTION });
+
+        // --- fillet top & bottom edges of the pocket (interior only)
+        var binNow = qBodyType(qEverything(EntityType.BODY), BodyType.SOLID);
+        var allE = qOwnedByBody(binNow, EntityType.EDGE);
+        const xlim = Dx/2 - 3*millimeter; const ylim = Dy/2 - 3*millimeter;
+        var botE = []; var topE = [];
+        for (var e in evaluateQuery(context, allE))
+        {
+            var b = evBox3d(context, { "topology" : e, "tight" : true });
+            var zc = (b.minCorner[2] + b.maxCorner[2]) / 2;
+            var inside = b.minCorner[0] > -xlim && b.maxCorner[0] < xlim && b.minCorner[1] > -ylim && b.maxCorner[1] < ylim;
+            if (inside && abs(zc - floorTop) < 0.4*millimeter) { botE = append(botE, e); }
+            if (inside && abs(zc - recessZ) < 0.4*millimeter)  { topE = append(topE, e); }
+        }
+        if (definition.fillet > 0 * millimeter && size(botE) > 0)
+            try silent { opFillet(context, id + "filBot", { "entities" : qUnion(botE), "radius" : definition.fillet }); }
+        if (definition.fillet > 0 * millimeter && size(topE) > 0)
+            try silent { opFillet(context, id + "filTop", { "entities" : qUnion(topE), "radius" : definition.fillet }); }
+    });
