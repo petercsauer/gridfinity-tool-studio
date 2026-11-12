@@ -235,7 +235,7 @@ gridMat.depthWrite = false;
 grid.position.y = -0.2;
 scene.add(grid);
 let mesh: THREE.Mesh | null = null;
-const mat = new THREE.MeshStandardMaterial({ color: 0xcfcfd4, metalness: 0, roughness: 0.5, flatShading: false });
+const mat = new THREE.MeshStandardMaterial({ color: 0x86bbef, metalness: 0, roughness: 0.5, flatShading: false });
 mat.envMapIntensity = 0.8;
 mat.fog = false;
 groundMat.fog = false;
@@ -243,7 +243,7 @@ contactMat.fog = false;
 gridMat.fog = true;
 function applyTheme3D(): void {
   const d = isDark();
-  mat.color.set(d ? 0x9a9aa0 : 0xcfcfd4);
+  mat.color.set(d ? 0x6fa3d6 : 0x86bbef); // light blue, like a spool of PLA
   groundMat.opacity = d ? 0.35 : 0.16;
   contactMat.opacity = d ? 1 : 0.85;
   gridMat.color.set(d ? 0xffffff : 0x000000);
