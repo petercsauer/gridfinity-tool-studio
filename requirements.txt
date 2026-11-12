@@ -10,5 +10,5 @@ onnxruntime>=1.17,<2
 matplotlib>=3.8,<4        # calibration-sheet PDF generator
 pillow>=10.0,<14
 pytest>=8,<10             # tests (tests/python)
-# Optional, not required: HEIC decoding off macOS (macOS converts HEIC with sips)
+# Optional: HEIC/HEIF (iPhone) photos in the Python CLI and src/gts.decode_image
 # pillow-heif>=0.16,<2

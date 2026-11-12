@@ -20,7 +20,7 @@ def main():
     photo=a[0]; img=cv2.imread(photo)
     base=name or os.path.splitext(os.path.basename(photo))[0]
     H=A.homography_img2mm(A.detect_markers(img))
-    if H is None: print("markers not found"); return
+    if H is None: print("need all 4 corner markers. retake with every corner marker visible."); return
     canvas,_=A.rectify(img,H)
     sess=new_session(model)
     rgb=cv2.cvtColor(canvas,cv2.COLOR_BGR2RGB)

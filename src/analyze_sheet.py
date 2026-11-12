@@ -70,7 +70,7 @@ def main():
     found=detect_markers(img)
     print("markers found:",sorted(found))
     H=homography_img2mm(found)
-    if H is None: print("need >=2 markers (4 best). retake with all corners visible."); return
+    if H is None: print("need all 4 corner markers. retake with every corner marker visible."); return
     canvas,_=rectify(img,H)
     os.makedirs(OUT,exist_ok=True)
     cv2.imwrite(os.path.join(OUT,f"rectified_{base}.png"),canvas)

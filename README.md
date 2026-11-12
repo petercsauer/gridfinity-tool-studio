@@ -1,27 +1,28 @@
 # Gridfinity Tool Studio
 
 Turn a phone photo of a hand tool into a 3D‑printable [gridfinity](https://gridfinity.xyz) bin with a tool‑shaped pocket.
+It runs entirely in your browser: **https://gridfinity-tool-studio.pages.dev**
 
 ![Gridfinity Tool Studio](docs/screenshot.png)
 
-1. **Print** the calibration sheet (Letter or A4) at 100 % / Actual Size.
+1. **Print** the calibration sheet (Letter or A4, linked in the app) at 100 % / Actual Size.
 2. **Photograph** the tool lying flat on it, from straight above, flash on.
-3. **Tune** the pocket, finger slot, bin height, depth and edge rounding, and watch the bin update in 3D.
+3. **Upload** the photo, then tune the pocket, finger slot, bin height, depth and edge rounding, and watch the
+   bin update in 3D.
 4. **Export STL** and print.
 
 The four corner markers on the sheet give exact real‑world scale and remove perspective, so the pocket is
 measured in millimetres, not guessed. The tool is cut out of the photo with an AI background‑removal model,
-which handles shiny metal and black handles that simple thresholding misses.
+which handles shiny metal and black handles that simple thresholding misses. Four built‑in demo tools let you
+try it without a photo.
 
-## Quick start
+## Privacy
 
-```sh
-python3 -m pip install -r requirements.txt     # Python 3.11+
-python3 webapp/app.py                          # → http://localhost:8765
-```
-
-The first photo upload downloads the background‑removal model (~170 MB) and takes about 10 s; later uploads
-are faster. Everything runs locally; photos never leave your machine.
+Your photos never leave your device: sheet detection, background removal, tracing and the 3D bin all run in
+the browser. Uploaded tools are kept only in this browser's storage (the newest 20), and you can remove them
+in the app. The first upload asks before downloading the background‑removal model (about 88 MB) from Hugging
+Face; the engine that runs it (onnxruntime) comes from jsDelivr. Both are cached by the browser. There are no
+analytics, accounts or cookies. Details: [web/privacy.html](web/privacy.html).
 
 ## Taking a good photo
 
@@ -30,9 +31,11 @@ are faster. Everything runs locally; photos never leave your machine.
   cover a corner marker and is fully in the photo.
 - Hold the camera **level**, straight above the sheet, with the **flash on**.
 - **iPhone:** Settings › Camera › **Grid** on, then line up the two crosshairs in the Camera app before shooting.
-- Keep all **4 corner markers** visible. Photos without the sheet are rejected.
+- Keep all **4 corner markers** visible. Photos without the whole sheet are rejected.
 
-JPEG, PNG and HEIC (iPhone) photos all work.
+JPEG, PNG and HEIC (iPhone) photos all work. The first upload takes longer while the model downloads; later
+uploads reuse the cached copy. Browsers with WebGPU run the model on the GPU; others fall back to WebAssembly,
+which takes some seconds per photo.
 
 ## What you can tune
 
@@ -52,34 +55,83 @@ cells to fit the pocket. The 3D preview keeps your camera angle between rebuilds
 
 ## How it works
 
-`webapp/app.py` is a small Python server; `webapp/index.html` is the whole UI (Three.js for the 3D preview).
-The pipeline itself is the `gts` package in `src/gts/` (`sheet`, `trace`, `geometry`, `bin`).
+The app in `web/` is a static site (Vite + TypeScript). The UI is `web/index.html`, `web/src/styles.css` and
+`web/src/main.ts`; the pipeline runs in a Web Worker (`web/src/worker/`).
 
-1. **Sheet:** ArUco markers (`cv2.aruco`, 4×4 dictionary) → homography to sheet millimetres
-   (`src/gts/sheet.py`).
-2. **Cut‑out:** [rembg](https://github.com/danielgatis/rembg) IS‑Net on the perspective‑corrected page, then
-   again on a tight crop around the tool for precise edges.
-3. **Outline:** largest contour → smoothing spline → straightened to the tool's long axis.
-4. **Pocket:** shapely offset for clearance, plus a stadium‑shaped finger slot.
-5. **Bin:** [manifold3d](https://github.com/elalish/manifold) builds the gridfinity feet, body and stacking lip,
-   and subtracts the pocket with stepped round‑overs, so the STL is always watertight.
+1. **Decode:** JPEG/PNG through the browser, HEIC through heic2any (`web/src/vision/decode.ts`).
+2. **Sheet:** ArUco markers (OpenCV.js, 4×4 dictionary) → homography to sheet millimetres
+   (`web/src/vision/sheet.ts`).
+3. **Cut‑out:** IS‑Net (fp16 ONNX, onnxruntime‑web on WebGPU or WASM) on the perspective‑corrected page, then
+   again on a tight crop around the tool for precise edges (`web/src/vision/segment.ts`).
+4. **Outline:** largest contour → smoothing spline → straightened to the tool's long axis, optionally
+   mirror‑averaged (`outline.ts`, `smooth.ts`, `symmetry.ts`).
+5. **Pocket:** offset for clearance, plus a stadium‑shaped finger slot (`web/src/geometry/pocket.ts`).
+6. **Bin:** [manifold](https://github.com/elalish/manifold) (WebAssembly) builds the gridfinity feet, body and
+   stacking lip, and subtracts the pocket with stepped round‑overs, so the STL is always watertight
+   (`web/src/geometry/bin.ts`). Three.js draws the preview.
 
-## Other tools in this repo
+The Python package in `src/gts/` is the reference implementation the browser port was checked against; the
+JSON fixtures in `tests/fixtures/` pin the two to the same results.
+
+## Developing the web app
+
+Needs Node 22 or newer.
+
+```sh
+cd web
+npm ci
+npm run dev          # http://localhost:5173
+npm test             # unit tests (vitest)
+npm run typecheck
+npm run build        # → web/dist
+npm run e2e          # end-to-end tests (Playwright) against the production build
+```
+
+- The unit tests that run the model download it once (~88 MB) to `web/.cache/` (gitignored) and skip when
+  offline. The upload end‑to‑end test reuses that file and skips if it isn't there.
+- `npm run e2e` uses the system Google Chrome by default. Set `CHROME_PATH` to another Chrome, or
+  `PW_BUNDLED_CHROMIUM=1` to use Playwright's Chromium after `npx playwright install chromium`.
+- `vite dev`/`vite preview` send no cross‑origin isolation headers, so onnxruntime runs single‑threaded
+  locally. The deployed site sets them.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
+
+## Python reference and command‑line tools
+
+Optional: you don't need Python to use or develop the web app. Requires Python 3.11 or newer. Use a virtual
+environment (Homebrew's Python refuses global `pip install`):
+
+```sh
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest -q
+```
+
+- The command‑line tracer uses [rembg](https://github.com/danielgatis/rembg), which downloads the IS‑Net model
+  (~180 MB) to `~/.rembg/models/` on first use (older rembg versions: `~/.u2net/`). The tests don't need it.
+- HEIC photos need the optional `pip install pillow-heif`; otherwise convert them to JPEG first.
+- Run the scripts with `python -I` (isolated mode).
 
 | Path | Purpose |
 |---|---|
 | `src/gts/` | The reference pipeline as a package: sheet detection, tracing, pocket geometry, bin |
-| `src/sheetgen.py` | Regenerates the calibration sheet PDFs and marker metadata in `assets/sheet/`: `python3 src/sheetgen.py letter` or `a4` |
-| `src/analyze_rembg.py` | Command‑line version of the trace pipeline for a single photo |
-| `src/gridfinity_bin.py`, `src/holder.py`, `src/pack.py` | Command‑line bin, pocket and multi‑tool layout generators |
-| `src/gf_build_all.py`, `src/gridfinity.fs.tmpl`, `src/onshape.py` | Builds the bins as a parametric Onshape FeatureScript feature (needs an Onshape API key in `~/.onshape_key`) |
-| `docs/design-spec.md` | Design spec for the UI |
+| `src/sheetgen.py` | Regenerates the calibration sheet PDFs, preview and `sheet_markers.json` in `assets/sheet/` (tracked files): `python -I src/sheetgen.py letter` or `a4` |
+| `src/analyze_rembg.py` | Traces one photo of your own: `python -I src/analyze_rembg.py photo.jpg` → mask and overlay in `out/` |
+| `src/holder.py` | Builds the pockets of the four preset tools from `assets/presets/` into `out/` (run this first) |
+| `src/gridfinity_bin.py`, `src/stl_block.py`, `src/pack.py` | Then: a gridfinity bin STL, a simple test‑print block, or a multi‑tool baseplate layout, from the pockets in `out/` |
+| `src/gf_build_all.py`, `src/gf_build.py`, `src/gridfinity.fs.tmpl`, `src/onshape.py` | Builds the bins as a parametric Onshape FeatureScript feature. Needs an Onshape API key in `~/.onshape_key` and an existing document's ids in `/tmp/gf_onshape.json` |
+| `scripts/build_presets.py` | Writes the web app's preset data and sheet PDFs (`web/public/`) from `src/gts` and `assets/` |
+| `scripts/make_fixtures.py` | Writes the parity fixtures in `tests/fixtures/` from the reference |
 | `assets/presets/` | The four built‑in demo tools: photo (`<tool>.jpg`), rectified image (`<tool>_rect.png`) and mask (`<tool>_mask.png`) |
 | `assets/sheet/` | Calibration sheet PDFs, preview and `sheet_markers.json` (marker positions in mm) |
-| `tests/python/` | Tests: `python3 -m pytest -q` |
+| `docs/design-spec.md` | Design spec for the UI |
 
-The command‑line tools write their generated files to `out/`, which is not tracked.
+The command‑line tools write their generated files to `out/`, which is not tracked. `src/sheetgen.py` is the
+exception: it overwrites the tracked sheet files in `assets/sheet/` (then run `scripts/build_presets.py` to
+copy them into the web app).
 
 ## License
 
-MIT — see LICENSE. Third-party notices, including the AI model weights caveat, are in NOTICE.
+MIT, see [LICENSE](LICENSE). Third‑party notices, including the caveat on the AI model weights, are in
+[NOTICE](NOTICE).

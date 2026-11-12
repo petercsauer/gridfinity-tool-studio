@@ -13,27 +13,56 @@ gridfinity-rebuilt-openscad
   https://github.com/kennetek/gridfinity-rebuilt-openscad (src/core/standard.scad).
   MIT License, Copyright (c) 2023 Kenneth Hodson.
 
-Runtime components (not included in this repository; downloaded or installed separately):
+Browser app (web/): third-party code bundled into the built site (web/dist)
 
 three.js (https://github.com/mrdoob/three.js)
   MIT License, Copyright (c) 2010-2023 three.js authors.
 
-rembg (https://github.com/danielgatis/rembg)
-  MIT License, Copyright (c) Daniel Gatis.
+manifold-3d (https://github.com/elalish/manifold), Apache License 2.0.
+
+OpenCV.js via @techstark/opencv-js (https://github.com/TechStark/opencv-js),
+  including the ArUco module. Apache License 2.0 (OpenCV, https://opencv.org).
+
+onnxruntime-web (https://github.com/microsoft/onnxruntime)
+  MIT License, Copyright (c) Microsoft Corporation. The JavaScript is bundled;
+  its WebAssembly files are fetched at runtime from cdn.jsdelivr.net.
+
+heic2any (https://github.com/alexcorvi/heic2any)
+  MIT License, Copyright (c) 2020 Alex Corvi.
+  heic2any includes libheif (https://github.com/strukturag/libheif), licensed
+  under the GNU Lesser General Public License v3.0. It is shipped unmodified,
+  inside heic2any's own separately loaded file (dist/assets/heic2any-*.js),
+  which can be replaced with another build of heic2any/libheif.
+
+idb-keyval (https://github.com/jakearchibald/idb-keyval)
+  Apache License 2.0, Copyright 2016 Jake Archibald.
+
+Development-only tools (not shipped in the site): Vite, Vitest, TypeScript,
+Playwright and their dependencies, under their own licenses.
+
+AI model weights (not included in this repository; downloaded at runtime)
 
 IS-Net "isnet-general-use" model weights
   From "Highly Accurate Dichotomous Image Segmentation", Xuebin Qin, Hang Dai,
   Xiaobin Hu, Deng-Ping Fan, Ling Shao, Luc Van Gool, ECCV 2022.
   https://github.com/xuebinqin/DIS (code: Apache License 2.0).
-  The weights are downloaded at runtime and are NOT covered by this project's
-  MIT license. The upstream authors do not state a license for the weights;
-  the DIS5K training dataset is restricted to non-commercial research and
-  educational use. Check upstream terms before commercial use.
+  The browser app downloads an fp16 ONNX export from
+  https://huggingface.co/imgly/isnet-general-onnx (the repository is tagged
+  MIT by img.ly); the Python reference downloads the same weights through rembg.
+  The weights are NOT covered by this project's MIT license. The upstream
+  authors do not state a license for the weights; the DIS5K training dataset
+  is restricted to non-commercial research and educational use. Check upstream
+  terms before commercial use.
 
+Python reference package and command-line tools (installed separately with pip)
+
+rembg (https://github.com/danielgatis/rembg)
+  MIT License, Copyright (c) Daniel Gatis.
 manifold3d (https://github.com/elalish/manifold), Apache License 2.0.
 OpenCV including the ArUco module (https://opencv.org), Apache License 2.0.
-NumPy, SciPy, Shapely, trimesh, onnxruntime, Matplotlib, Pillow: see each
-package's license (BSD / MIT / PSF-style).
+NumPy, SciPy, Shapely, trimesh, onnxruntime, Matplotlib, Pillow, pillow-heif
+(optional): see each package's license (BSD / MIT / PSF-style; pillow-heif
+bundles libheif, LGPL-3.0).
 
 Apple, macOS, SF Pro and Liquid Glass are trademarks of Apple Inc. This
 project is not affiliated with or endorsed by Apple.

@@ -1,7 +1,6 @@
 """Photo to tool outline: decoding, background removal and the upright, centred outline (mm)."""
+import io
 import os
-import subprocess
-import tempfile
 import threading
 from dataclasses import dataclass
 
@@ -114,20 +113,31 @@ def load_preset(tool, presets_dir=PRESETS_DIR):
 
 
 def decode_image(raw):
-    """Decode uploaded bytes. OpenCV handles JPEG/PNG/etc.; anything it can't
-    (HEIC/HEIF from iPhones, TIFF variants...) is converted by macOS ``sips``."""
+    """Decode uploaded bytes to a BGR image. OpenCV handles JPEG/PNG/etc.; HEIC/HEIF
+    (iPhone photos) is decoded with the optional ``pillow-heif`` package when it is
+    installed. Returns None for bytes that are not an image; raises ValueError for
+    HEIC/HEIF when ``pillow-heif`` is missing."""
     img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
     if img is not None:
         return img
-    with tempfile.TemporaryDirectory() as d:
-        src, dst = os.path.join(d, "in"), os.path.join(d, "out.jpg")
-        with open(src, "wb") as f:
-            f.write(raw)
-        subprocess.run(["sips", "-s", "format", "jpeg", src, "--out", dst],
-                       capture_output=True, timeout=60)
-        if os.path.exists(dst):
-            img = cv2.imread(dst, cv2.IMREAD_COLOR)
-    return img
+    if not _is_heif(raw):
+        return None
+    try:
+        import pillow_heif
+    except ImportError:
+        raise ValueError("HEIC/HEIF photos need the optional pillow-heif package "
+                         "(pip install pillow-heif), or convert the photo to JPEG first.") from None
+    from PIL import Image
+    pillow_heif.register_heif_opener()
+    with Image.open(io.BytesIO(raw)) as im:
+        rgb = np.asarray(im.convert("RGB"))
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def _is_heif(raw):
+    """True for ISO-BMFF HEIC/HEIF/AVIF bytes (an ``ftyp`` box with a HEIF brand)."""
+    return len(raw) >= 12 and raw[4:8] == b"ftyp" and raw[8:12] in (
+        b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx", b"mif1", b"msf1", b"avif")
 
 
 def process_photo(img, meta=META, segment=rembg_mask, px=PX):

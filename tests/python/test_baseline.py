@@ -1,7 +1,8 @@
 """Behavior-preserving baseline for the gts reference package.
 
-The expected values were measured with the pre-refactor webapp/app.py, so these
-tests pin the extraction into src/gts to the old behavior.
+The expected values were measured with the original Python web server (since
+retired in favour of the browser app), so these tests pin the src/gts reference
+package to that behavior.
 """
 import json
 

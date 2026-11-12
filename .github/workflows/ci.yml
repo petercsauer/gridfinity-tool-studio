@@ -1,0 +1,75 @@
+# CI for the browser app (web/) and the Python reference package (src/gts). No deploy job:
+# deploys to Cloudflare Pages are manual (wrangler pages deploy).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install ruff
+      - name: Lint
+        run: python -m ruff check src tests scripts
+      # The Python tests use stored preset masks, so they never need the rembg model.
+      - name: Test
+        run: python -m pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # The IS-Net model (~88 MB, MODEL_URL in src/vision/model.ts) is cached in web/.cache. On a cache
+      # miss the unit tests download it from Hugging Face; if that fails, the model tests and the
+      # upload e2e skip rather than fail.
+      - name: Cache the IS-Net model
+        uses: actions/cache@v4
+        with:
+          path: web/.cache
+          key: isnet-model-${{ hashFiles('web/src/vision/model.ts') }}
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: No file over the 25 MiB Cloudflare Pages limit
+        run: |
+          big=$(find dist -type f -size +25M)
+          if [ -n "$big" ]; then echo "Files over 25 MiB: $big"; exit 1; fi
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: npm run e2e
+        env:
+          PW_BUNDLED_CHROMIUM: '1'

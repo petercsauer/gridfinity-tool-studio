@@ -2,7 +2,7 @@
 
 Apple, macOS, SF Pro and Liquid Glass are trademarks of Apple Inc. This project is not affiliated with or endorsed by Apple.
 
-This document describes the visual design of the Gridfinity Tool Studio UI (`webapp/index.html`): tokens, component specs and the do/don't list. Use it to keep new UI consistent.
+This document describes the visual design of the Gridfinity Tool Studio browser app: markup in `web/index.html`, styles in `web/src/styles.css` and behavior in `web/src/main.ts`. It covers tokens, component specs and the do/don't list. Use it to keep new UI consistent.
 
 **Reference apps:** Keynote's Format inspector, Freeform's canvas, Quick Look's 3D viewer, System Settings' grouped forms.
 
@@ -101,7 +101,7 @@ Put these in `:root`. The light values are the defaults, and the dark values ove
   --trace-pocket: var(--red);      /* red outline + 12% fill */
   --trace-slot:   var(--orange);   /* reserved, if the slot is ever drawn */
 
-  /* ---------- Legacy aliases used by the <script> (must exist) ---------- */
+  /* ---------- Legacy aliases used by main.ts (must exist) ---------- */
   --muted:   var(--label-2);
   --accent2: var(--text-red);
   --ok:      var(--text-green);

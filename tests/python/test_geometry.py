@@ -11,7 +11,7 @@ from gts.bin import genbin, max_depth
 from gts.constants import GAP, GRID, LIP_INSET, MIN_WALL, TOOLS
 from gts.geometry import footprint, make_pocket, mirror_score, rotate, symmetrize, xy
 from gts.sheet import META, detect_markers, missing_markers
-from gts.trace import load_preset, preset_paths, process_photo
+from gts.trace import decode_image, load_preset, preset_paths, process_photo
 
 ROTATIONS = (0, 15, 20, 30, 45, 60, 90)
 CLEARANCES = (0.0, 2.5, 5.0)
@@ -171,3 +171,13 @@ def test_marker_detection_ignores_extra_ids():
     canvas[:img.shape[0]] = img
     canvas[img.shape[0]+120:img.shape[0]+280, 120:280] = tag[:, :, None]
     assert set(detect_markers(canvas)) == {0, 1, 2, 3}
+
+
+def test_decode_image_handles_jpeg_garbage_and_heic_without_pillow_heif(monkeypatch):
+    with open(preset_paths("needlenose")[0], "rb") as f:
+        img = decode_image(f.read())
+    assert img is not None and img.ndim == 3
+    assert decode_image(b"not an image at all") is None
+    monkeypatch.setitem(__import__("sys").modules, "pillow_heif", None)  # simulate "not installed"
+    with pytest.raises(ValueError, match="pillow-heif"):
+        decode_image(b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic")
