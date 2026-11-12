@@ -22,7 +22,8 @@ Your photos never leave your device: sheet detection, background removal, tracin
 the browser. Uploaded tools are kept only in this browser's storage (the newest 20), and you can remove them
 in the app. The first upload asks before downloading the background‑removal model (about 88 MB) from Hugging
 Face; the engine that runs it (onnxruntime) comes from jsDelivr. Both are cached by the browser. There are no
-analytics, accounts or cookies. Details: [web/privacy.html](web/privacy.html).
+analytics scripts, accounts or cookies; the app only counts a few steps anonymously (upload, export) by
+requesting an empty file from the site. Details: [web/privacy.html](web/privacy.html).
 
 ## Taking a good photo
 

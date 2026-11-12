@@ -6,6 +6,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { maxDepth } from './geometry/pocket';
 import { clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
 import { loadUploads, removeUpload, saveUpload, touchUpload } from './storage';
+import { count } from './count';
 import { writeStl } from './stl';
 import { traceDxf, traceSvg, type TraceLayers } from './trace-export';
 import { isDark, TraceView } from './trace';
@@ -361,6 +362,7 @@ function syncExport(): void {
 function saveStl(): void {
   const cur = exportable();
   if (!cur) return;
+  count('export-stl');
   download(new Blob([writeStl(cur.bin.positions, cur.bin.indices)], { type: 'model/stl' }), `gridfinity_${cur.tool}.stl`);
 }
 expBtn.addEventListener('click', () => {
@@ -394,6 +396,7 @@ async function saveTrace(kind: 'svg' | 'dxf'): Promise<void> {
   if (!lastTrace) return;
   const label = toolMenu.selectedOptions[0]?.textContent ?? lastTrace.tool;
   const base = `trace_${lastTrace.tool}`;
+  count(kind === 'svg' ? 'export-svg' : 'export-dxf');
   if (kind === 'svg') download(new Blob([traceSvg(lastTrace.layers, label)], { type: 'image/svg+xml' }), `${base}.svg`);
   else download(new Blob([traceDxf(lastTrace.layers)], { type: 'application/dxf' }), `${base}.dxf`);
 }
@@ -591,9 +594,11 @@ async function uploadPhoto(file: File): Promise<void> {
   if (!modelConsent && !(await modelCached().catch(() => false))) {
     say('');
     if (!(await askModelConsent())) {
+      count('model-no');
       say('Upload cancelled. Nothing was downloaded.');
       return;
     }
+    count('model-yes');
     modelConsent = true;
   }
   say('Reading the photo…');
@@ -608,6 +613,7 @@ async function uploadPhoto(file: File): Promise<void> {
   } catch {
     saved = false; // e.g. storage full or private browsing: still usable until reload
   }
+  count('upload-ok');
   dropped.forEach(dropUploadTool);
   addUploadTool(t);
   selectTool(t.id);
@@ -619,9 +625,13 @@ input('upFile').addEventListener('change', async () => {
   const file = input('upFile').files?.[0];
   if (!file) return;
   upBtn.disabled = true;
+  count('upload-start');
   try {
     await uploadPhoto(file);
   } catch (e) {
+    const code = e instanceof PipelineError ? e.code : '';
+    count(code === 'no-sheet' ? 'upload-no-sheet' : code === 'no-tool' ? 'upload-no-tool'
+      : code === 'cut-off' ? 'upload-cut-off' : 'upload-error');
     say(errorText(e), 'error');
   } finally {
     upBtn.disabled = false;
