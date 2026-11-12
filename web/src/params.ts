@@ -25,7 +25,7 @@ export const HOLE_STYLES: readonly HoleStyle[] = ['none', 'magnet', 'screw', 'bo
 type NumericKey = { [K in keyof Params]: Params[K] extends number ? K : never }[keyof Params];
 
 export const DEFAULTS: Params = {
-  tool: 'needlenose', sym: true, clearance: 2.5, rot: 0, slotOn: true, slotR: 12.5, slotOver: 6,
+  tool: 'groovejoint', sym: false, clearance: 2.5, rot: 0, slotOn: true, slotR: 12.5, slotOver: 6,
   slotFrac: 0.4, u: 3, depth: 10, fillet: 3.175, bfillet: 0, holes: 'none', holesCorners: false, lip: true,
 };
 

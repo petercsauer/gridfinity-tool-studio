@@ -8,7 +8,7 @@ import pytest
 from shapely.geometry import MultiPolygon, Polygon, box
 
 from gts.bin import genbin, max_depth
-from gts.constants import GAP, GRID, LIP_INSET, MIN_WALL, TOOLS
+from gts.constants import GAP, GRID, LIP_INSET, MIN_WALL, FIXTURE_TOOLS as TOOLS
 from gts.geometry import footprint, make_pocket, mirror_score, rotate, symmetrize, xy
 from gts.sheet import META, detect_markers, missing_markers
 from gts.trace import decode_image, load_preset, preset_paths, process_photo

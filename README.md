@@ -13,8 +13,8 @@ It runs entirely in your browser: **https://gridfinitytools.com** (also at https
 
 The four corner markers on the sheet give exact real‑world scale and remove perspective, so the pocket is
 measured in millimetres, not guessed. The tool is cut out of the photo with an AI background‑removal model,
-which handles shiny metal and black handles that simple thresholding misses. Four built‑in demo tools let you
-try it without a photo.
+which handles shiny metal and black handles that simple thresholding misses. Two built‑in demo tools (groove‑joint
+pliers and a stud finder) let you try it without a photo.
 
 ## Privacy
 
@@ -127,12 +127,13 @@ python -m pytest -q
 | `src/gts/` | The reference pipeline as a package: sheet detection, tracing, pocket geometry, bin |
 | `src/sheetgen.py` | Regenerates the calibration sheet PDFs, preview and `sheet_markers.json` in `assets/sheet/` (tracked files): `python -I src/sheetgen.py letter` or `a4` |
 | `src/analyze_rembg.py` | Traces one photo of your own: `python -I src/analyze_rembg.py photo.jpg` → mask and overlay in `out/` |
-| `src/holder.py` | Builds the pockets of the four preset tools from `assets/presets/` into `out/` (run this first) |
+| `src/holder.py` | Builds the pockets of the four fixture tools from `assets/presets/` into `out/` (run this first) |
 | `src/gridfinity_bin.py`, `src/stl_block.py`, `src/pack.py` | Then: a gridfinity bin STL, a simple test‑print block, or a multi‑tool baseplate layout, from the pockets in `out/` |
 | `src/gf_build_all.py`, `src/gf_build.py`, `src/gridfinity.fs.tmpl`, `src/onshape.py` | Builds the bins as a parametric Onshape FeatureScript feature. Needs an Onshape API key in `~/.onshape_key` and an existing document's ids in `/tmp/gf_onshape.json` |
-| `scripts/build_presets.py` | Writes the web app's preset data and sheet PDFs (`web/public/`) from `src/gts` and `assets/` |
+| `scripts/make_preset_assets.py` | Turns a photo on the sheet into a demo tool's files in `assets/presets/`: `python -I scripts/make_preset_assets.py photo.jpg <tool>` (add the tool to `TOOLS`, `SYM_DEFAULT` and `PRESET_REGIONS` in `src/gts/constants.py` first) |
+| `scripts/build_presets.py` | Writes the web app's demo presets and sheet PDFs (`web/public/`), and the fixture tools' presets for the web tests (`tests/fixtures/web-presets/`) |
 | `scripts/make_fixtures.py` | Writes the parity fixtures in `tests/fixtures/` from the reference |
-| `assets/presets/` | The four built‑in demo tools: photo (`<tool>.jpg`), rectified image (`<tool>_rect.png`) and mask (`<tool>_mask.png`) |
+| `assets/presets/` | The two demo tools (`groovejoint`, `studfinder`) and the four tools the parity fixtures are made from (`needlenose`, `combopliers`, `flushcutter`, `stripper`): photo (`<tool>.jpg`), rectified image (`<tool>_rect.png`) and mask (`<tool>_mask.png`) |
 | `assets/sheet/` | Calibration sheet PDFs, preview and `sheet_markers.json` (marker positions in mm) |
 | `docs/design-spec.md` | Design spec for the UI |
 

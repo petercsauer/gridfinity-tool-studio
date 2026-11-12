@@ -68,8 +68,11 @@ Both scripts are deterministic, so a second run gives no diff.
 - **Parity fixtures** (`tests/fixtures/`), after any change to the reference in `src/gts/`:
   `python -I scripts/make_fixtures.py && git status --short tests/fixtures`.
   The fields are documented in [tests/fixtures/README.md](tests/fixtures/README.md).
-- **Web presets and sheets** (`web/public/presets/`, `web/public/sheet/`), after changing `src/gts/`,
-  `assets/presets/` or `assets/sheet/`: `python -I scripts/build_presets.py`.
+- **Web presets and sheets** (`web/public/presets/`, `tests/fixtures/web-presets/`, `web/public/sheet/`), after
+  changing `src/gts/`, `assets/presets/` or `assets/sheet/`: `python -I scripts/build_presets.py`.
+- **A new demo tool:** add it to `TOOLS`, `SYM_DEFAULT` and `PRESET_REGIONS` in `src/gts/constants.py`, run
+  `python -I scripts/make_preset_assets.py photo.jpg <tool>`, check the mask, then run `scripts/build_presets.py`.
+  `TOOLS` is what the app ships; `FIXTURE_TOOLS` are the photos the parity tests use.
 - **Calibration sheet** (`assets/sheet/`, tracked): `python -I src/sheetgen.py letter` and `a4`, then
   `scripts/build_presets.py`. The marker layout is shared by every photo and preset, so changing it
   invalidates them.

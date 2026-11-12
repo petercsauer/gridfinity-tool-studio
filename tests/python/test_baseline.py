@@ -12,7 +12,7 @@ import pytest
 
 import sheetgen
 from gts.bin import genbin
-from gts.constants import SHEET_META, SYM_DEFAULT, TOOLS
+from gts.constants import SHEET_META, SYM_DEFAULT, FIXTURE_TOOLS as TOOLS
 from gts.geometry import footprint, make_pocket, symmetrize, xy
 from gts.sheet import detect_markers, load_meta, sheet_view
 from gts.trace import load_preset, preset_paths

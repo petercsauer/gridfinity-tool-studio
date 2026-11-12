@@ -76,7 +76,7 @@ test('presets trace, the bin builds and Export saves a valid STL', async ({ page
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
   await expect.poll(() => tracePixels(page)).toBeGreaterThan(10_000);
   const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#exp').click()]);
-  expect(download.suggestedFilename()).toBe('gridfinity_needlenose.stl');
+  expect(download.suggestedFilename()).toBe('gridfinity_groovejoint.stl');
   const stl = readFileSync((await download.path())!);
   const triangles = stl.readUInt32LE(80);
   expect(triangles).toBeGreaterThan(1000);

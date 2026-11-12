@@ -1,3 +1,3 @@
 {
-  "presets": [{"id":"needlenose","label":"Needle-nose","sym":true},{"id":"combopliers","label":"Combo pliers","sym":true},{"id":"flushcutter","label":"Flush cutter","sym":true},{"id":"stripper","label":"Wire stripper","sym":false}]
+  "presets": [{"id":"groovejoint","label":"Groove-joint pliers","sym":false},{"id":"studfinder","label":"Stud finder","sym":true}]
 }

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from .constants import PRESETS_DIR, PX, REGION
+from .constants import PRESET_REGIONS, PRESETS_DIR, PX, REGION
 from .geometry import spline
 from .sheet import META, detect_markers, homography_img2mm, missing_markers, page_mm, rect_region
 
@@ -105,11 +105,11 @@ def preset_paths(tool, presets_dir=PRESETS_DIR):
 
 def load_preset(tool, presets_dir=PRESETS_DIR):
     """Trace assets of a built-in preset from its stored rectified image and mask
-    (rectified over ``REGION`` at ``PX`` px/mm)."""
+    (rectified over ``PRESET_REGIONS[tool]``, else ``REGION``, at ``PX`` px/mm)."""
     _, rect, mask = preset_paths(tool, presets_dir)
     bg = cv2.imread(rect)
     m = cv2.imread(mask, cv2.IMREAD_GRAYSCALE)
-    return build_assets(bg, m, origin=REGION[:2])
+    return build_assets(bg, m, origin=PRESET_REGIONS.get(tool, REGION)[:2])
 
 
 def decode_image(raw):

@@ -10,9 +10,9 @@ import { PipelineError } from '../protocol';
 import { outline } from './outline';
 
 const readPublic = <T>(file: string): T =>
-  JSON.parse(readFileSync(fileURLToPath(new URL(`../../../public/presets/${file}`, import.meta.url)), 'utf-8')) as T;
+  JSON.parse(readFileSync(fileURLToPath(new URL(`../../../../tests/fixtures/web-presets/${file}`, import.meta.url)), 'utf-8')) as T;
 
-/** The committed public/presets files, read from disk. */
+/** The fixture tools in the app's preset format (tests/fixtures/web-presets, written by build_presets.py). */
 const diskPresets: PresetSource = {
   list: async () => readPublic<{ presets: { id: string; label: string; sym: boolean }[] }>('index.json').presets,
   get: async (id) => {
@@ -26,6 +26,9 @@ let deps: Deps;
 beforeAll(async () => {
   deps = { manifold: await initManifold(), presets: diskPresets };
 });
+
+/** The defaults these tests were written against (the needle-nose preset, symmetric). */
+const NEEDLENOSE = { ...DEFAULTS, tool: 'needlenose', sym: true };
 
 describe.each(TOOLS)('outline handler: %s', (tool) => {
   const fx = presetFixture(tool);
@@ -53,15 +56,15 @@ describe.each(TOOLS)('outline handler: %s', (tool) => {
 
 describe('outline handler parameters', () => {
   it('keeps the sheet trace unrotated when the pocket is rotated', async () => {
-    const a = await outline({ ...DEFAULTS, rot: 0 }, deps);
-    const b = await outline({ ...DEFAULTS, rot: 45 }, deps);
+    const a = await outline({ ...NEEDLENOSE, rot: 0 }, deps);
+    const b = await outline({ ...NEEDLENOSE, rot: 45 }, deps);
     expect(b.sheetPocket).toEqual(a.sheetPocket);
     expect(b.nx).toBeGreaterThan(a.nx);
   });
 
   it('clamps out-of-range and non-numeric values', async () => {
-    const r = await outline({ ...DEFAULTS, clearance: 99, slotFrac: Number.NaN, u: 30, depth: 500 }, deps);
-    const ref = await outline({ ...DEFAULTS, clearance: 5, u: 8, depth: 46.05 }, deps);
+    const r = await outline({ ...NEEDLENOSE, clearance: 99, slotFrac: Number.NaN, u: 30, depth: 500 }, deps);
+    const ref = await outline({ ...NEEDLENOSE, clearance: 5, u: 8, depth: 46.05 }, deps);
     expect(r.pocket).toEqual(ref.pocket);
     expect(r.effectiveDepth).toBeCloseTo(46.05, 10);
     expect(r.maxDepth).toBeCloseTo(46.05, 10);

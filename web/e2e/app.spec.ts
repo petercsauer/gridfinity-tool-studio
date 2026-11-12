@@ -104,15 +104,18 @@ const pageErrors = (page: Page) => {
 test('presets load and the trace draws', async ({ page }) => {
   const errors = pageErrors(page);
   await open(page);
-  await expect(page.locator('#tool > option')).toHaveText(['Needle-nose', 'Combo pliers', 'Flush cutter', 'Wire stripper']);
+  await expect(page.locator('#tool > option')).toHaveText(['Groove-joint pliers', 'Stud finder']);
   await expect.poll(() => tracePixels(page)).toBeGreaterThan(10_000);
   // the trace and footprint follow the selected tool
   const before = await page.locator('#pdim').textContent();
-  await page.locator('#tool').selectOption('stripper');
+  await page.locator('#tool').selectOption('studfinder');
   await expect(page.locator('#pdim')).not.toHaveText(before!);
+  await expect(page.locator('#sym')).toBeChecked();
+  await expect(page.locator('#symNote')).toBeHidden();
+  // the groove-joint pliers aren't symmetric: turning the switch on warns
+  await page.locator('#tool').selectOption('groovejoint');
   await expect(page.locator('#sym')).not.toBeChecked();
   await expect(page.locator('#symNote')).toBeHidden();
-  // the stripper isn't symmetric: turning the switch on warns
   await page.locator('#sym').check();
   await expect(page.locator('#symNote')).toBeVisible();
   await expect(page.locator('#rmRow')).toBeHidden();
@@ -136,7 +139,7 @@ test('changing clearance updates the readout', async ({ page }) => {
 test('the bin builds and Export saves a valid binary STL', async ({ page }) => {
   await open(page);
   const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#exp').click()]);
-  expect(download.suggestedFilename()).toBe('gridfinity_needlenose.stl');
+  expect(download.suggestedFilename()).toBe('gridfinity_groovejoint.stl');
   const stl = readFileSync((await download.path())!);
   const triangles = stl.readUInt32LE(80);
   expect(triangles).toBeGreaterThan(1000);
@@ -200,7 +203,7 @@ test('an uploaded photo is traced, survives a reload and can be removed', async 
   // removal: gone from the menu, the selection falls back to a preset, and it stays gone
   await page.locator('#rmBtn').click();
   await expect(uploaded).toHaveCount(0);
-  await expect(page.locator('#tool')).toHaveValue('needlenose');
+  await expect(page.locator('#tool')).toHaveValue('groovejoint');
   await expect(page.locator('#rmRow')).toBeHidden();
   await expect(page.locator('#upMsg')).toHaveText(/Removed “stripper”/);
   await page.reload();
@@ -237,12 +240,12 @@ test('the trace downloads as SVG and DXF in millimetres', async ({ page }) => {
   await open(page);
   await expect(page.locator('#expSvg')).toBeEnabled();
   const [svgDl] = await Promise.all([page.waitForEvent('download'), page.locator('#expSvg').click()]);
-  expect(svgDl.suggestedFilename()).toBe('trace_needlenose.svg');
+  expect(svgDl.suggestedFilename()).toBe('trace_groovejoint.svg');
   const svg = readFileSync((await svgDl.path())!, 'utf8');
   expect(svg).toMatch(/<svg [^>]*width="[\d.]+mm" height="[\d.]+mm"/);
   expect(svg.match(/<path d="M/g)).toHaveLength(2);
   const [dxfDl] = await Promise.all([page.waitForEvent('download'), page.locator('#expDxf').click()]);
-  expect(dxfDl.suggestedFilename()).toBe('trace_needlenose.dxf');
+  expect(dxfDl.suggestedFilename()).toBe('trace_groovejoint.dxf');
   const dxf = readFileSync((await dxfDl.path())!, 'utf8');
   expect(dxf).toContain('AC1009');
   expect(dxf.match(/\r\nPOLYLINE\r\n/g)).toHaveLength(2);
@@ -266,6 +269,9 @@ test('base holes and the lip toggle rebuild the bin and change the deepest pocke
 
 test('the mirror axis shows on the trace only while Symmetric tool is on', async ({ page }) => {
   await open(page);
+  await expect(page.locator('#sym')).not.toBeChecked();
+  await expect(page.locator('.trace')).not.toHaveClass(/has-axis/);
+  await page.locator('#tool').selectOption('studfinder');
   await expect(page.locator('#sym')).toBeChecked();
   await expect(page.locator('.trace')).toHaveClass(/has-axis/);
   await expect(page.locator('.lg-axis')).toBeVisible();

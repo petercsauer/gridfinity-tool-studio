@@ -12,9 +12,17 @@ SCALE = PX                                 # same, as used by the sheet rectifie
 SHEET_PX = 4.0                             # px per mm for the on-paper trace image
 REGION = (14, 56, 201, 226)                # mm x0,y0,x1,y1 working area (excludes markers/rulers)
 
-TOOLS = {"needlenose": "Needle-nose", "combopliers": "Combo pliers",
-         "flushcutter": "Flush cutter", "stripper": "Wire stripper"}
-SYM_DEFAULT = {"needlenose": True, "combopliers": True, "flushcutter": True, "stripper": False}
+# the demo tools the web app ships (build_presets.py)
+TOOLS = {"groovejoint": "Groove-joint pliers", "studfinder": "Stud finder"}
+# the tools the parity fixtures are made from (make_fixtures.py); their photos stay in assets/presets/
+FIXTURE_TOOLS = {"needlenose": "Needle-nose", "combopliers": "Combo pliers",
+                 "flushcutter": "Flush cutter", "stripper": "Wire stripper"}
+SYM_DEFAULT = {"needlenose": True, "combopliers": True, "flushcutter": True, "stripper": False,
+               "groovejoint": False, "studfinder": True}
+# presets rectified over the whole page (x0, y0, x1, y1 in mm) instead of REGION, for tools that
+# run past the grid
+PAGE_REGION = (0.0, 0.0, 215.9, 279.4)
+PRESET_REGIONS = {"groovejoint": PAGE_REGION, "studfinder": PAGE_REGION}
 
 # ---- gridfinity constants (kennetek standard.scad) ----
 GRID = 42.0

@@ -178,9 +178,9 @@ describe('STL writer', () => {
   });
 });
 
-/** The committed public/presets files, read from disk. */
+/** The fixture tools in the app's preset format (tests/fixtures/web-presets, written by build_presets.py). */
 const readPublic = <T>(file: string): T =>
-  JSON.parse(readFileSync(fileURLToPath(new URL(`../../public/presets/${file}`, import.meta.url)), 'utf-8')) as T;
+  JSON.parse(readFileSync(fileURLToPath(new URL(`../../../tests/fixtures/web-presets/${file}`, import.meta.url)), 'utf-8')) as T;
 const diskPresets: PresetSource = {
   list: async () => readPublic<{ presets: { id: string; label: string; sym: boolean }[] }>('index.json').presets,
   get: async (id) => {

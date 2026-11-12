@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 from gts.bin import genbin
-from gts.constants import PX, REGION, SYM_DEFAULT, TOOLS
+from gts.constants import FIXTURE_TOOLS as TOOLS, PX, REGION, SYM_DEFAULT
 from gts.geometry import footprint, make_pocket, symmetrize, xy
 from gts.sheet import detect_markers, homography_img2mm
 from gts.trace import largest_contour, load_preset, preset_paths
