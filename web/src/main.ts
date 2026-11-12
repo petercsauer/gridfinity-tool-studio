@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { maxDepth } from './geometry/pocket';
 import { clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
+import { writeStl } from './stl';
 import { isDark, TraceView } from './trace';
 import { PipelineClient } from './worker/client';
 import { PipelineError, type BuildResult, type ToolInfo } from './worker/protocol';
@@ -300,6 +301,51 @@ tc.addEventListener('dblclick', frameView);
 // ---- pipeline actions
 const previewMsg = $('previewMsg');
 const spin = $('spin');
+
+// ---- export: only ever the bin for the current settings
+/** Bumped on every settings change; a mesh is current when it was built for this version. */
+let currentVersion = 0;
+let shown: { version: number; tool: string; bin: BuildResult } | null = null;
+/** Export was clicked while the bin was out of date: save as soon as the current one is ready. */
+let exportWanted = false;
+const expBtn = $<HTMLButtonElement>('exp');
+const expLabel = [...expBtn.childNodes].reverse().find((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim())!;
+/** The current bin, or null while it is being rebuilt (or can't be built). */
+const exportable = () => (shown && shown.version === currentVersion ? shown : null);
+/** The settings version that can't produce a bin (too large, or the build failed). */
+let blockedVersion = -1;
+function syncExport(): void {
+  const buildBlocked = blockedVersion === currentVersion;
+  const updating = !exportable() && !buildBlocked;
+  expBtn.disabled = buildBlocked || (updating && exportWanted);
+  expLabel.textContent = updating ? ' Updating…' : ' Export STL';
+  expBtn.setAttribute('aria-busy', String(updating));
+  if (buildBlocked) exportWanted = false;
+  if (exportWanted && exportable()) {
+    exportWanted = false;
+    saveStl();
+    syncExport();
+  }
+}
+function saveStl(): void {
+  const cur = exportable();
+  if (!cur) return;
+  const blob = new Blob([writeStl(cur.bin.positions, cur.bin.indices)], { type: 'model/stl' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `gridfinity_${cur.tool}.stl`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 1500);
+}
+expBtn.addEventListener('click', () => {
+  exportWanted = true;
+  syncExport();
+});
 /** Footprint of the latest outline; builds are skipped while it is over the limit. */
 let tooLarge = false;
 /** The latest outline refresh; a build waits for it so it sees the current footprint. */
@@ -335,18 +381,25 @@ async function generate(): Promise<void> {
   }
   busy = true;
   spin.style.display = 'grid';
+  let version = currentVersion;
   try {
     await pendingOutline;
-    if (!tooLarge) {
-      const r = await client.request('build', { params: state() });
+    version = currentVersion;
+    if (tooLarge) blockedVersion = version;
+    else {
+      const params = state();
+      const r = await client.request('build', { params });
       if (r) {
         showMesh(r);
+        shown = { version, tool: params.tool, bin: r };
         previewMsg.textContent = '';
       }
     }
   } catch (e) {
+    blockedVersion = version;
     previewMsg.textContent = errorText(e);
   }
+  syncExport();
   busy = false;
   spin.style.display = 'none';
   if (again) {
@@ -365,6 +418,8 @@ function debounce(fn: () => void, ms: number): () => void {
 const dOutline = debounce(() => { pendingOutline = refreshOutline(); }, 100);
 const dGenerate = debounce(() => void generate(), 400);
 function changed(): void {
+  currentVersion++;
+  syncExport();
   dOutline();
   dGenerate();
 }
@@ -487,6 +542,7 @@ try {
   tools.forEach(addToolOption);
   applyToolDefaults();
   syncDepth();
+  syncExport();
   pendingOutline = refreshOutline();
   await pendingOutline;
   void generate();
