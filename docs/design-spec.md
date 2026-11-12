@@ -1,7 +1,9 @@
-# Gridfinity Tool Studio: Apple redesign spec (Liquid Glass, macOS 26/27)
+# Design spec
 
-**Target file:** `webapp/index.html` (single file). Reference copy: `index.pre-apple.html`. Before screenshot: `/tmp/gf_ui_before.png`.
-**Server:** already running at http://localhost:8765. Do not start, stop or restart it. Reload the page to see edits.
+Apple, macOS, SF Pro and Liquid Glass are trademarks of Apple Inc. This project is not affiliated with or endorsed by Apple.
+
+This document describes the visual design of the Gridfinity Tool Studio UI (`webapp/index.html`): tokens, component specs and the do/don't list. Use it to keep new UI consistent.
+
 **Reference apps:** Keynote's Format inspector, Freeform's canvas, Quick Look's 3D viewer, System Settings' grouped forms.
 
 ---
@@ -392,7 +394,7 @@ They are still `<input type="checkbox">` with the same id and `checked` default.
 - **Trace pane:** `background:var(--bg-canvas)`. Caption `.caption` "Trace": `position:absolute; top:12px; left:16px; font:500 11px/14px var(--font); color:var(--label-2); z-index:5; pointer-events:none`.
 - **3D pane:** `background:radial-gradient(ellipse 80% 70% at 50% 40%, var(--bg-3d-top) 0%, var(--bg-3d-mid) 60%, var(--bg-3d-edge) 100%)`. The WebGL canvas is transparent. Caption "Preview".
 - **Background extension:** the `body` background behind the inspector is `linear-gradient(to right, var(--bg-3d-edge), var(--bg-underpage))`, so the inspector glass samples a continuation of the 3D backdrop rather than flat white or black.
-- **Photo in the trace** (allowed presentation edit inside `drawFlat`): clip the photo to a rounded rect, `fctx.roundRect(x,y,w,h, 8*devicePixelRatio)` → `clip()`, before `drawImage`. Keep `globalAlpha=.92` and all geometry math unchanged. No border and no shadow on the photo.
+- **Photo in the trace** (inside `drawFlat`): clip the photo to a rounded rect, `fctx.roundRect(x,y,w,h, 8*devicePixelRatio)` → `clip()`, before `drawImage`. Keep `globalAlpha=.92` and all geometry math unchanged. No border and no shadow on the photo.
 
 ### 3.11 Loading indicator (`.spinner`)
 - A 12-spoke spinner as one element: `width:14px;height:14px;` with a `background: conic-gradient(...)` mask, or (preferred) an inline SVG of 12 rounded spokes (2×4.5 px, `stroke-linecap:round`) colored `currentColor` with opacities stepping from 1 to .15. Use `animation:spin 1s steps(12) infinite`. 14 px in the capsule, 12 px in `#upBtn`. Never show a progress bar here, since the duration is unknown.
@@ -401,14 +403,14 @@ They are still `<input type="checkbox">` with the same id and `checked` default.
 - `position:absolute; left:12px; bottom:12px; height:28px; padding:0 12px; display:flex; align-items:center; gap:12px; font:var(--t-subhead); color:var(--label); z-index:5`. Regular small glass. It sits over the neutral `--bg-canvas`, not over the photo, so clear glass and a dimming layer aren't needed.
 - Items: **Tool** uses a line swatch `width:14px;height:2px;border-radius:1px;background:var(--trace-tool)`. **Pocket** uses a filled swatch `width:12px;height:9px;border-radius:2px;background:color-mix(in srgb,var(--trace-pocket) 14%,transparent);box-shadow:inset 0 0 0 1.5px var(--trace-pocket)`. Shape differs as well as color (line versus filled region), so color isn't the only cue. Remove the inline `style` hex colors.
 
-### 3.13 2D trace drawing (allowed color-only edits in `drawFlat`)
+### 3.13 2D trace drawing (`drawFlat`)
 - Read the colors once per draw: `const cs=getComputedStyle(document.documentElement); const cTool=cs.getPropertyValue('--trace-tool').trim(), cPocket=cs.getPropertyValue('--trace-pocket').trim();`.
 - Pocket: halo first (`lineWidth = 4*dpr`, `rgba(255,255,255,.65)`), then fill `color-mix`-equivalent `rgba(R,G,B,.12)` (keep the existing `.14`), then stroke `cPocket` at `2*dpr`.
 - Tool: halo `3.5*dpr` white at .7, then stroke `cTool` at `1.6*dpr`. Use `lineJoin='round'`.
 - Note: the current code uses device-pixel line widths of 2 and 1.6 without dpr. Multiplying by `devicePixelRatio` is optional. If you do it, apply it uniformly.
 - Redraw on `matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawFlat)`.
 
-### 3.14 3D viewer look (Quick Look product shot; allowed edits to the 3D setup and `showSTL`)
+### 3.14 3D viewer look (Quick Look product shot; 3D setup and `showSTL`)
 - Renderer: `new THREE.WebGLRenderer({canvas:tc, antialias:true, alpha:true})`, `renderer.setClearColor(0x000000, 0)`, `scene.background = null` (the CSS gradient shows through), `renderer.outputColorSpace = THREE.SRGBColorSpace`, `renderer.toneMapping = THREE.ACESFilmicToneMapping`, `toneMappingExposure = 1.0`.
 - Environment: `import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'`, then `scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture`. Remove the blue-tinted HemisphereLight. Keep one `DirectionalLight(0xffffff, 0.8)` from above and front at `(0.4R, 2R, 0.6R)` with `castShadow`, and no visible helpers.
 - Bin material: `MeshStandardMaterial({color: light 0xD9D9DE / dark 0xA7A7AD, roughness:.6, metalness:0})`, a matte neutral PLA look. No blue tint, because the accent is reserved for the UI. Swap the color on the color-scheme change.
@@ -420,8 +422,8 @@ They are still `<input type="checkbox">` with the same id and `checked` default.
 - Reduced motion: `dampingFactor=1` (no inertia).
 - The scene must never show a blank pane. Before the first mesh arrives, the gradient backdrop and the ground shadow plane (unscaled) are already visible.
 
-### 3.15 Additive presentation JS (a separate small block; does not change existing logic)
-Allowed as an appended `<script type="module">`, or appended at the end of the existing module:
+### 3.15 Presentation JS
+Small presentation-only listeners, kept separate from the app logic:
 1. Slider `--p` sync on `input` and at load, for all 8 ranges.
 2. `html.inactive` toggled on `window` `blur`/`focus`.
 3. `.inspector-body.scrolled` toggled on `scroll` (`scrollTop>0`).
@@ -464,7 +466,9 @@ Allowed as an appended `<script type="module">`, or appended at the end of the e
 
 ---
 
-## 5. Constraints (must hold after the redesign)
+## 5. UI contract
+
+The script depends on these ids and variables; keep them when changing the markup or CSS.
 
 1. **Every id survives with the same element type and semantics:**
    - `<select id="tool">`. The script fills its options; keep it empty in the markup.
@@ -477,7 +481,4 @@ Allowed as an appended `<script type="module">`, or appended at the end of the e
    - `<canvas id="flat">`, `<canvas id="three">`. Each is the sole sizing child of an unpadded parent that has a definite size.
    - `#spin`: works when the script sets `style.display='grid'`/`'none'`. CSS default is `display:none`. Its children may be static markup.
 2. **CSS variables used by the script stay defined:** `--muted`, `--accent2`, `--ok`.
-3. **Script behavior is unchanged:** fetch endpoints (`/tools`, `/bg/<id>.png`, `/outline`, `/generate`, `/upload`), debounce timings (100 ms outline, 400 ms generate), busy/again coalescing, the `bind()` formatters, `applyToolDefaults`, the export filename `gridfinity_<id>.stl`, the upload flow, the top-level await order and the importmap (three@0.160 from unpkg).
-4. **Edits allowed inside the script:** only (a) the 3D scene setup: renderer flags, background, lights, environment, material, grid, ground shadow, camera fov and fit, and control limits; (b) the ground placement and camera fit in `showSTL` (still parse, center, rotate and replace the mesh the same way); (c) colors, halos and the photo clip in `drawFlat`, with geometry and scale math unchanged; (d) the additive presentation listeners from 3.15. No other logic changes.
-5. Markup and CSS may be restructured freely within the above. The `.tag`, `.legend`, `.grp`, `.cta` and `.stat` classes have no script dependency and can be renamed or removed.
-6. Do not start, stop or restart the Python server. Verify by reloading http://localhost:8765 in light and dark mode, at 1440×900 and at about 1000 px wide.
+3. Markup and CSS may be restructured freely within the above. The `.tag`, `.legend`, `.grp`, `.cta` and `.stat` classes have no script dependency and can be renamed or removed.

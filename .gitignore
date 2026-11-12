@@ -17,3 +17,9 @@ out/*
 !out/rembgmask_combopliers.png
 !out/rembgmask_flushcutter.png
 !out/rembgmask_stripper.png
+.claude/
+node_modules/
+dist/
+.cache/
+web/test-results/
+web/playwright-report/

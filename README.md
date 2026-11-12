@@ -71,5 +71,9 @@ cells to fit the pocket. The 3D preview keeps your camera angle between rebuilds
 | `src/analyze_rembg.py` | Command‑line version of the trace pipeline for a single photo |
 | `src/gridfinity_bin.py`, `src/holder.py`, `src/pack.py` | Command‑line bin, pocket and multi‑tool layout generators |
 | `src/gf_build_all.py`, `src/gridfinity.fs.tmpl`, `src/onshape.py` | Builds the bins as a parametric Onshape FeatureScript feature (needs an Onshape API key in `~/.onshape_key`) |
-| `webapp/design/apple-spec.md` | Design spec for the UI |
+| `docs/design-spec.md` | Design spec for the UI |
 | `assets/presets/` | Photos the four built‑in demo tools were traced from |
+
+## License
+
+MIT — see LICENSE. Third-party notices, including the AI model weights caveat, are in NOTICE.

@@ -1,0 +1,39 @@
+Gridfinity Tool Studio
+Copyright (c) 2026 Peter Sauer
+Licensed under the MIT License (see LICENSE).
+
+This project builds bins compatible with the Gridfinity modular storage system.
+
+Gridfinity
+  Created by Zack Freedman. https://gridfinity.xyz
+  MIT License, Copyright (c) 2023 Zachary Freedman and Voidstar Lab LLC.
+
+gridfinity-rebuilt-openscad
+  Gridfinity base, stacking-lip and grid dimensions follow
+  https://github.com/kennetek/gridfinity-rebuilt-openscad (src/core/standard.scad).
+  MIT License, Copyright (c) 2023 Kenneth Hodson.
+
+Runtime components (not included in this repository; downloaded or installed separately):
+
+three.js (https://github.com/mrdoob/three.js)
+  MIT License, Copyright (c) 2010-2023 three.js authors.
+
+rembg (https://github.com/danielgatis/rembg)
+  MIT License, Copyright (c) Daniel Gatis.
+
+IS-Net "isnet-general-use" model weights
+  From "Highly Accurate Dichotomous Image Segmentation", Xuebin Qin, Hang Dai,
+  Xiaobin Hu, Deng-Ping Fan, Ling Shao, Luc Van Gool, ECCV 2022.
+  https://github.com/xuebinqin/DIS (code: Apache License 2.0).
+  The weights are downloaded at runtime and are NOT covered by this project's
+  MIT license. The upstream authors do not state a license for the weights;
+  the DIS5K training dataset is restricted to non-commercial research and
+  educational use. Check upstream terms before commercial use.
+
+manifold3d (https://github.com/elalish/manifold), Apache License 2.0.
+OpenCV including the ArUco module (https://opencv.org), Apache License 2.0.
+NumPy, SciPy, Shapely, trimesh, onnxruntime, Matplotlib, Pillow: see each
+package's license (BSD / MIT / PSF-style).
+
+Apple, macOS, SF Pro and Liquid Glass are trademarks of Apple Inc. This
+project is not affiliated with or endorsed by Apple.
