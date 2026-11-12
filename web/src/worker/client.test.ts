@@ -48,4 +48,19 @@ describe('PipelineClient', () => {
     reply({ id: sent[0]!.id, kind: 'build', version: 1, ok: false, code: 'not-implemented', error: 'later' });
     await expect(r).rejects.toMatchObject({ code: 'not-implemented', message: 'later' });
   });
+
+  it('hands progress messages to the request that asked for them', async () => {
+    const { port, sent, reply } = fakePort();
+    const c = new PipelineClient(port);
+    const seen: number[] = [];
+    const image = { width: 1, height: 1, data: new Uint8ClampedArray(4) };
+    const r = c.request('upload', { image, name: 'x' }, [], (p) => seen.push(p.loaded));
+    const id = sent[0]!.id;
+    const progress = (loaded: number) => ({ id, progress: { stage: 'model', loaded, total: 2 } }) as unknown as Response;
+    reply(progress(1));
+    reply(progress(2));
+    reply({ id, kind: 'upload', version: 1, ok: false, code: 'no-sheet', error: 'no sheet' });
+    await expect(r).rejects.toMatchObject({ code: 'no-sheet' });
+    expect(seen).toEqual([1, 2]);
+  });
 });

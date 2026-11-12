@@ -3,10 +3,10 @@ import wasmUrl from 'manifold-3d/manifold.wasm?url';
 import { initManifold } from '../geometry/manifold';
 import { build } from './handlers/build';
 import { outline } from './handlers/outline';
-import { upload } from './handlers/upload';
+import { upload, workerUploadEnv } from './handlers/upload';
 import type { Deps } from './deps';
 import { fetchPresets, type PresetSource } from './presets';
-import { PipelineError, type Request, type Response, type Results } from './protocol';
+import { PipelineError, type ProgressMessage, type Request, type Response, type Results } from './protocol';
 
 interface WorkerScope {
   postMessage(message: unknown, transfer?: Transferable[]): void;
@@ -36,8 +36,11 @@ async function handle(req: Request): Promise<Results[Request['kind']]> {
       return outline(req.params, await deps());
     case 'build':
       return build(req.params, await deps());
-    case 'upload':
-      return upload(req.file, req.name, await deps());
+    case 'upload': {
+      const progress = (loaded: number, total: number) =>
+        scope.postMessage({ id: req.id, progress: { stage: 'model', loaded, total } } satisfies ProgressMessage);
+      return upload(req.image, req.name, await deps(), workerUploadEnv(progress));
+    }
   }
 }
 

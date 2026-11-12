@@ -7,6 +7,7 @@ import { maxDepth } from './geometry/pocket';
 import { clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
 import { writeStl } from './stl';
 import { isDark, TraceView } from './trace';
+import { decodePhoto } from './vision/decode';
 import { PipelineClient } from './worker/client';
 import { PipelineError, type BuildResult, type ToolInfo } from './worker/protocol';
 
@@ -491,7 +492,8 @@ input('upFile').addEventListener('change', async () => {
   msg.textContent = 'Finding calibration sheet and tracing the tool…';
   $<HTMLButtonElement>('upBtn').disabled = true;
   try {
-    const t = await client.request('upload', { file, name: file.name.replace(/\.[^.]+$/, '').slice(0, 40) });
+    const image = await decodePhoto(file, file.name);
+    const t = await client.request('upload', { image, name: file.name.replace(/\.[^.]+$/, '').slice(0, 40) }, [image.data.buffer]);
     if (!t) return;
     tools.push(t);
     addToolOption(t);

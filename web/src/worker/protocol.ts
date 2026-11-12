@@ -3,6 +3,8 @@
 // that a newer request of the same kind has superseded.
 import type { Ring } from '../geometry/pocket';
 import type { Params } from '../params';
+import type { Affine } from '../vision/outline';
+import type { Box, RGBAImage } from '../vision/sheet';
 
 export interface ToolInfo {
   id: string;
@@ -41,13 +43,34 @@ export interface BuildResult {
   ny: number;
 }
 
+export interface UploadResult extends ToolInfo {
+  /** Upright, centred tool outline (mm), 720 points, last repeats the first. */
+  outline: Ring;
+  /** Size [w, h] of the upright crop the outline is centred in (mm). */
+  crop: [number, number];
+  /** 2x3 affine [A | b] from outline mm to sheet mm: sheet = A q + b. */
+  up2sheet: Affine;
+  /** The symmetric version of the outline and how symmetric the tool is (mirror IoU, 1 = perfectly). */
+  symmetry: { outline: Ring; score: number; axisDeg: number; offset: number };
+  /** JPEG of the perspective-corrected sheet the tool was shot on, and its sheet-mm extent [x0, y0, x1, y1]. */
+  sheetViewJpeg: Blob;
+  sheetBox: Box;
+}
+
+/** Sent by the worker while a request runs (before its response), e.g. during the model download. */
+export interface ProgressMessage {
+  id: number;
+  progress: { stage: 'model'; loaded: number; total: number };
+}
+
 export interface Requests {
   /** Where the static assets (presets/) live; sent once before anything else. */
   configure: { assetBase: string };
   listTools: Record<string, never>;
   outline: { params: Params };
   build: { params: Params };
-  upload: { file: Blob; name: string };
+  /** A photo decoded on the UI thread (decodePhoto); send its pixel buffer as a transferable. */
+  upload: { image: RGBAImage; name: string };
 }
 
 export interface Results {
@@ -55,7 +78,7 @@ export interface Results {
   listTools: ToolInfo[];
   outline: OutlineResult;
   build: BuildResult;
-  upload: ToolInfo;
+  upload: UploadResult;
 }
 
 export type Kind = keyof Requests;
@@ -64,7 +87,10 @@ export type Request<K extends Kind = Kind> = K extends Kind
   ? { id: number; kind: K; version: number } & Requests[K]
   : never;
 
-export type ErrorCode = 'not-implemented' | 'unknown-tool' | 'too-large' | 'invalid' | 'internal';
+/** `no-sheet`: the calibration markers weren't all found; `no-tool`: nothing on the sheet; `cut-off`: part of
+ * the tool is outside the photo. */
+export type ErrorCode = 'not-implemented' | 'unknown-tool' | 'too-large' | 'invalid' | 'no-sheet' | 'no-tool' | 'cut-off'
+  | 'internal';
 
 export type Response<K extends Kind = Kind> = K extends Kind
   ? | { id: number; kind: K; version: number; ok: true; result: Results[K] }

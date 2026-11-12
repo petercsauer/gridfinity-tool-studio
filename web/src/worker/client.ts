@@ -1,6 +1,6 @@
 // UI-side wrapper around the pipeline worker: one promise per request, and responses
 // to superseded requests (an older version of the same kind) are dropped.
-import { PipelineError, type Kind, type Request, type Requests, type Response, type Results } from './protocol';
+import { PipelineError, type Kind, type ProgressMessage, type Request, type Requests, type Response, type Results } from './protocol';
 
 /** The part of a Worker (or MessagePort) the client needs; tests pass a fake. */
 export interface Port {
@@ -13,6 +13,7 @@ interface Pending {
   version: number;
   resolve(value: unknown): void;
   reject(reason: unknown): void;
+  onProgress?: (p: ProgressMessage['progress']) => void;
 }
 
 export class PipelineClient {
@@ -21,18 +22,20 @@ export class PipelineClient {
   private readonly pending = new Map<number, Pending>();
 
   constructor(private readonly port: Port) {
-    port.addEventListener('message', (e) => this.receive(e.data as Response));
+    port.addEventListener('message', (e) => this.receive(e.data as Response | ProgressMessage));
   }
 
   /** Sends a request. Resolves with the result, or with `undefined` if a newer request of
-   * the same kind was sent before this one finished. Rejects with a PipelineError. */
-  request<K extends Kind>(kind: K, body: Requests[K], transfer: Transferable[] = []): Promise<Results[K] | undefined> {
+   * the same kind was sent before this one finished. Rejects with a PipelineError. `onProgress` sees the
+   * worker's progress messages for this request. */
+  request<K extends Kind>(kind: K, body: Requests[K], transfer: Transferable[] = [],
+    onProgress?: (p: ProgressMessage['progress']) => void): Promise<Results[K] | undefined> {
     const version = (this.latest.get(kind) ?? 0) + 1;
     this.latest.set(kind, version);
     const id = this.nextId++;
     const msg = { ...body, id, kind, version } as Request<K>;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { kind, version, resolve: resolve as (v: unknown) => void, reject });
+      this.pending.set(id, { kind, version, resolve: resolve as (v: unknown) => void, reject, onProgress });
       this.port.postMessage(msg, transfer);
     });
   }
@@ -42,9 +45,13 @@ export class PipelineClient {
     return this.latest.get(kind) === version;
   }
 
-  private receive(res: Response): void {
+  private receive(res: Response | ProgressMessage): void {
     const p = this.pending.get(res.id);
     if (!p) return;
+    if ('progress' in res) {
+      p.onProgress?.(res.progress);
+      return;
+    }
     this.pending.delete(res.id);
     if (!this.isCurrent(p.kind, p.version)) p.resolve(undefined);
     else if (res.ok) p.resolve(res.result);
