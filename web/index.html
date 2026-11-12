@@ -24,6 +24,7 @@
     <div class="legend glass" aria-label="Legend">
       <span><i class="sw-tool"></i>Tool</span>
       <span><i class="sw-pocket"></i>Pocket</span>
+      <span class="lg-axis"><i class="sw-axis"></i>Axis</span>
     </div>
   </section>
   <div class="divider" aria-hidden="true"></div>
@@ -111,6 +112,11 @@
       </div>
     </div>
     <div class="footer">Slot position along the tool’s length.</div>
+    <div class="sheet-pill trace-pill" title="The traced outline and the pocket at 1:1 scale in millimetres, for laser cutting foam or CAD">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8.2"/><path d="M5 7.4 8 10.4l3-3"/><path d="M3 12.6h10"/></svg>
+      <span class="sheet-label">Trace outline</span>
+      <span class="sheet-seg"><button id="expSvg" disabled title="SVG at 1:1 mm (Inkscape, Illustrator, laser cutters)">SVG</button><button id="expDxf" disabled title="DXF in mm (Fusion, Onshape, AutoCAD, LightBurn)">DXF</button></span>
+    </div>
 
     <h2 class="section">Bin</h2>
     <div class="card">
@@ -127,6 +133,19 @@
       </div>
     </div>
     <div class="footer num" id="depthNote"></div>
+
+    <h2 class="section">Base</h2>
+    <div class="card">
+      <div class="row"><label for="holes">Holes</label><select id="holes">
+        <option value="none">None</option>
+        <option value="magnet">Magnets (6×2 mm)</option>
+        <option value="screw">Screws (M3)</option>
+        <option value="both">Magnets + screws</option>
+      </select></div>
+      <div class="row" title="Holes only at the bin’s four outer corners"><label for="holesCorners">Corners only</label><input type="checkbox" id="holesCorners" role="switch"></div>
+      <div class="row" title="The rim that lets bins stack; off gives a flat top and a deeper pocket"><label for="lip">Stacking lip</label><input type="checkbox" id="lip" role="switch" checked></div>
+    </div>
+    <div class="footer">Magnet holes are 6.5 mm wide and 2.4 mm deep, screw holes 3 mm by 6 mm, per the gridfinity standard.</div>
 
     <h2 class="section">Edges</h2>
     <div class="card">

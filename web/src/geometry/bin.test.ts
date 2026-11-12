@@ -98,6 +98,62 @@ describe('bin edge cases', () => {
   });
 });
 
+describe('base options', () => {
+  // a 1x1 bin with a small pocket keeps these quick
+  const disc: Ring = Array.from({ length: 64 }, (_, k) => [8 * Math.cos((k * Math.PI) / 32), 5 * Math.sin((k * Math.PI) / 32)]);
+  const base: BinParams = { u: 3, depth: 6, fillet: 1, bfillet: 0 };
+  const volume = (p: BinParams, nx = 1, ny = 1) => {
+    const { bin } = genbinManifold(m, disc, nx, ny, p);
+    try {
+      expect(bin.status()).toBe('NoError');
+      const parts = bin.decompose();
+      expect(parts.length).toBe(1);
+      parts.forEach((x) => x.delete());
+      return bin.volume();
+    } finally {
+      bin.delete();
+    }
+  };
+  const cyl = (d: number, h: number) => Math.PI * (d / 2) ** 2 * h;
+  let v0 = 0;
+  beforeAll(() => {
+    v0 = volume(base);
+  });
+
+  it.each([
+    ['magnet', cyl(6.5, 2.4)],
+    ['screw', cyl(3, 6)],
+    ['both', cyl(6.5, 2.4) + cyl(3, 6 - 2.4)],
+  ] as const)('%s holes remove four holes per cell', (holes, each) => {
+    // polygonal cylinders are slightly smaller than true ones: allow 1.5%
+    expect((v0 - volume({ ...base, holes })) / (4 * each)).toBeCloseTo(1, 1);
+    expect(liveObjects()).toBe(0);
+  });
+
+  it('corners only puts holes at the four outer corners of a 2x2 bin', () => {
+    const all = volume({ ...base, holes: 'magnet' }, 2, 2);
+    const corners = volume({ ...base, holes: 'magnet', holesCorners: true }, 2, 2);
+    const none = volume(base, 2, 2);
+    expect((none - all) / (none - corners)).toBeCloseTo(4, 1); // 16 holes against 4
+  });
+
+  it('without the lip the top is flat at the bin height and the pocket can go 4.4 mm deeper', () => {
+    const p: BinParams = { ...base, depth: 40, lip: false };
+    const r = genbin(m, disc, 1, 1, p);
+    expect(r.bbox.max[2]).toBeCloseTo(21, 3);
+    expect(r.effectiveDepth).toBeCloseTo(maxDepth(3, { lip: true }) + 4.4, 6);
+    expect(r.effectiveDepth).toBeCloseTo(maxDepth(3, p), 6);
+  });
+
+  it('screw holes raise the pocket floor so the pocket never breaks into them', () => {
+    const p: BinParams = { ...base, depth: 40, holes: 'screw' };
+    const r = genbin(m, disc, 1, 1, p);
+    expect(r.effectiveDepth).toBeCloseTo(21 - 4.4 - (6 + 0.8), 6);
+    expect(r.effectiveDepth).toBeCloseTo(maxDepth(3, p), 6);
+    expect(maxDepth(3, { holes: 'magnet' })).toBeCloseTo(maxDepth(3), 6); // magnets fit under the usual floor
+  });
+});
+
 describe('STL writer', () => {
   it('writes one 50-byte record per triangle, Z up, with the mesh vertices', () => {
     const fx = presetFixture('flushcutter');

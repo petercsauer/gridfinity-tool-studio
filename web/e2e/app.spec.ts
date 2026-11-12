@@ -232,3 +232,44 @@ test('the privacy page renders and is linked from the inspector', async ({ page 
   await expect(page.locator('body')).toContainText('Cloudflare Pages');
   await page.screenshot({ path: test.info().outputPath('privacy.png'), fullPage: true });
 });
+
+test('the trace downloads as SVG and DXF in millimetres', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('#expSvg')).toBeEnabled();
+  const [svgDl] = await Promise.all([page.waitForEvent('download'), page.locator('#expSvg').click()]);
+  expect(svgDl.suggestedFilename()).toBe('trace_needlenose.svg');
+  const svg = readFileSync((await svgDl.path())!, 'utf8');
+  expect(svg).toMatch(/<svg [^>]*width="[\d.]+mm" height="[\d.]+mm"/);
+  expect(svg.match(/<path d="M/g)).toHaveLength(2);
+  const [dxfDl] = await Promise.all([page.waitForEvent('download'), page.locator('#expDxf').click()]);
+  expect(dxfDl.suggestedFilename()).toBe('trace_needlenose.dxf');
+  const dxf = readFileSync((await dxfDl.path())!, 'utf8');
+  expect(dxf).toContain('AC1009');
+  expect(dxf.match(/\r\nPOLYLINE\r\n/g)).toHaveLength(2);
+  expect(dxf.trimEnd().endsWith('EOF')).toBe(true);
+});
+
+test('base holes and the lip toggle rebuild the bin and change the deepest pocket', async ({ page }) => {
+  await open(page);
+  const deepest = async () => +((await page.locator('#depthNote').textContent())!.match(/([\d.]+) mm/)![1]!);
+  const d0 = await deepest();
+  await expect(page.locator('#holesCorners')).toBeDisabled();
+  await page.locator('#holes').selectOption('screw');
+  await expect(page.locator('#holesCorners')).toBeEnabled();
+  expect(await deepest()).toBeCloseTo(d0 - 1.25, 2); // floor above the 6 mm screw holes
+  await page.locator('#lip').uncheck();
+  expect(await deepest()).toBeCloseTo(d0 - 1.25 + 4.4, 2);
+  await expect(page.locator('#exp')).toHaveText(/Export STL/, { timeout: 60_000 });
+  await expect(page.locator('#exp')).toBeEnabled();
+  await expect(page.locator('#previewMsg')).toHaveText('');
+});
+
+test('the mirror axis shows on the trace only while Symmetric tool is on', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('#sym')).toBeChecked();
+  await expect(page.locator('.trace')).toHaveClass(/has-axis/);
+  await expect(page.locator('.lg-axis')).toBeVisible();
+  await page.locator('#sym').uncheck();
+  await expect(page.locator('.trace')).not.toHaveClass(/has-axis/);
+  await expect(page.locator('.lg-axis')).toBeHidden();
+});

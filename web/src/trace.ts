@@ -1,5 +1,6 @@
 // The Trace pane: the perspective-corrected calibration sheet with the tool (blue) and
-// pocket (red) outlines drawn where the tool lies on the paper, all in sheet mm.
+// pocket (red) outlines drawn where the tool lies on the paper, all in sheet mm, plus the mirror
+// axis (green, dashed) when "Symmetric tool" is on.
 import type { OutlineResult } from './worker/protocol';
 
 export const isDark = () => document.documentElement.dataset.theme === 'dark';
@@ -47,6 +48,7 @@ export class TraceView {
     const cs = getComputedStyle(document.documentElement);
     const cTool = cs.getPropertyValue('--trace-tool').trim();
     const cPocket = cs.getPropertyValue('--trace-pocket').trim();
+    const cAxis = cs.getPropertyValue('--trace-axis').trim();
     ctx.clearRect(0, 0, W, H);
     const o = this.outline;
     if (!o) return;
@@ -105,6 +107,22 @@ export class TraceView {
     ctx.lineWidth = 1.6 * dpr;
     ctx.strokeStyle = cTool;
     ctx.stroke();
+    flat.parentElement!.classList.toggle('has-axis', !!o.sheetAxis);
+    if (o.sheetAxis) {
+      const [[ax, ay], [bx, by]] = o.sheetAxis;
+      ctx.beginPath();
+      ctx.moveTo(ox + (ax - bx0) * s, oy + (ay - by0) * s);
+      ctx.lineTo(ox + (bx - bx0) * s, oy + (by - by0) * s);
+      ctx.setLineDash([]);
+      ctx.lineWidth = 4 * dpr;
+      ctx.strokeStyle = halo;
+      ctx.stroke();
+      ctx.setLineDash([7 * dpr, 4 * dpr]);
+      ctx.lineWidth = 1.8 * dpr;
+      ctx.strokeStyle = cAxis;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     flat.parentElement!.classList.add('ready');
   }
 }

@@ -21,7 +21,7 @@
   --focus-ring:rgba(0,103,244,.50); --selection:#B3D7FF;
 
   --destructive:var(--text-red); --warning:var(--text-orange); --success:var(--text-green);
-  --trace-tool:var(--accent); --trace-pocket:var(--red); --trace-slot:var(--orange);
+  --trace-tool:var(--accent); --trace-pocket:var(--red); --trace-axis:var(--green); --trace-slot:var(--orange);
 
 
   --glass-lg-bg:rgba(246,246,248,.72);
@@ -210,11 +210,11 @@ input[type=checkbox][role=switch]:active::before{width:24px}
 input[type=checkbox][role=switch]:checked:active::before{transform:translateX(10px)}
 
 /* ---- pop-up ---- */
-#tool{-webkit-appearance:none;appearance:none;height:var(--ctl-h);max-width:170px;flex:0 1 170px;min-width:0;
+#tool, #holes{-webkit-appearance:none;appearance:none;height:var(--ctl-h);max-width:170px;flex:0 1 170px;min-width:0;
   padding:0 26px 0 9px;border:0;border-radius:var(--r-control);
   background:var(--fill) var(--chevron) no-repeat right 8px center / 8px 12px;
   color:var(--label);font:var(--t-body);text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
-#tool:active{background-color:var(--fill-pressed)}
+#tool:active, #holes:active{background-color:var(--fill-pressed)}
 
 /* ---- push button ---- */
 .btn{height:var(--ctl-h);padding:0 12px;border:0;border-radius:var(--r-control);background:var(--fill);color:var(--label);
@@ -229,10 +229,12 @@ a.btn{text-decoration:none;cursor:default}
 .sheet-pill > svg{width:15px;height:15px;flex:none;color:var(--label-2)}
 .sheet-label{flex:1;white-space:nowrap}
 .sheet-seg{display:flex;gap:2px;padding:2px;border-radius:var(--r-capsule);background:var(--fill)}
-.sheet-seg a{height:24px;padding:0 11px;display:grid;place-items:center;border-radius:var(--r-capsule);
+.sheet-seg a, .sheet-seg button{border:0;background:none;height:24px;padding:0 11px;display:grid;place-items:center;border-radius:var(--r-capsule);
   color:var(--label);text-decoration:none;font:var(--t-subhead);font-weight:600}
-.sheet-seg a:hover{background:var(--fill-pressed)}
-.sheet-seg a:active{transform:scale(.96)}
+.sheet-seg a:hover, .sheet-seg button:hover:enabled{background:var(--fill-pressed)}
+.sheet-seg a:active, .sheet-seg button:active:enabled{transform:scale(.96)}
+.sheet-seg button:disabled{color:var(--label-3, var(--label-2));opacity:.5}
+.trace-pill{margin-top:8px}
 .tips{font:var(--t-subhead);color:var(--label-2);margin:8px 24px 0;padding-left:18px}
 .tips li{margin:2px 0}
 .tips b{color:var(--label);font-weight:600}
@@ -273,6 +275,9 @@ section.view.preview{background:radial-gradient(ellipse farthest-side at 50% 45%
 .sw-tool{width:14px;height:2px;border-radius:1px;background:var(--trace-tool)}
 .sw-pocket{width:12px;height:9px;border-radius:2px;background:color-mix(in srgb,var(--trace-pocket) 14%,transparent);
   box-shadow:inset 0 0 0 1.5px var(--trace-pocket)}
+.sw-axis{width:14px;height:2px;background:repeating-linear-gradient(90deg,var(--trace-axis) 0 5px,transparent 5px 8px)}
+.legend .lg-axis{display:none}
+.trace.has-axis .legend .lg-axis{display:inline-flex}
 
 /* ---- viewer capsule ---- */
 .viewer-capsule:has(> #spin[style*="none"]){display:none}

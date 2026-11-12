@@ -15,3 +15,13 @@ export const FLOOR_MIN = 4.75 + 0.8;
 export const SLOT_FRAC_RANGE: readonly [number, number] = [0.02, 0.98];
 /** Segments per full circle for round offsets and the slot (shapely quad_segs=16). */
 export const CIRCULAR_SEGMENTS = 64;
+
+/** Base holes (kennetek gridfinity-rebuilt): a 6.5 x 2.4 mm magnet pocket for 6 x 2 mm magnets, and a
+ * 3 x 6 mm hole for M3 screws, centred 8 mm in from each side of a cell. */
+export const MAGNET_D = 6.5;
+export const MAGNET_H = 2.4;
+export const SCREW_D = 3;
+export const SCREW_H = 6;
+export const HOLE_FROM_SIDE = 8;
+/** Material kept between the deepest base hole and the pocket floor. */
+export const HOLE_FLOOR = 0.8;

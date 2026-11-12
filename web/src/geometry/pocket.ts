@@ -2,7 +2,8 @@
 // bin footprint. Mirrors make_pocket/footprint/rotate in src/gts/geometry.py.
 import type { CrossSection, ManifoldToplevel } from 'manifold-3d';
 import {
-  CIRCULAR_SEGMENTS, FLOOR_MIN, GAP, GRID, LIP_INSET, MIN_WALL, RECESS, SLOT_FRAC_RANGE, UHT,
+  CIRCULAR_SEGMENTS, FLOOR_MIN, GAP, GRID, HOLE_FLOOR, LIP_INSET, MAGNET_H, MIN_WALL, RECESS, SCREW_H,
+  SLOT_FRAC_RANGE, UHT,
 } from './constants';
 
 export type Vec2 = [number, number];
@@ -157,12 +158,35 @@ export function footprint(pocket: Ring, fillet: number): [number, number] {
   return [Math.ceil((b.xmax - b.xmin + margin) / GRID), Math.ceil((b.ymax - b.ymin + margin) / GRID)];
 }
 
-/** Deepest pocket a `u`-unit bin can hold, measured from the pocket opening (0 at 1U). */
-export function maxDepth(u: number): number {
-  return Math.max(0, u * UHT - RECESS - FLOOR_MIN);
+/** Holes in the bin's base: none, magnets, M3 screws, or a magnet pocket with a screw hole through it. */
+export type HoleStyle = 'none' | 'magnet' | 'screw' | 'both';
+
+/** The bin options that change how deep a pocket can go. */
+export interface BaseOptions {
+  /** Base holes (default none). */
+  holes?: HoleStyle;
+  /** Stacking lip on top (default on); without it the pocket opens at the bin top. */
+  lip?: boolean;
+}
+
+/** Depth below the bin top at which the pocket opens: the lip trough floor, or the top without a lip. */
+export function recess(o: BaseOptions = {}): number {
+  return o.lip === false ? 0 : RECESS;
+}
+
+/** Lowest pocket floor: above the feet, and above the deepest base hole so the pocket can't break into it. */
+export function floorMin(o: BaseOptions = {}): number {
+  const holes = o.holes ?? 'none';
+  const hole = holes === 'none' ? 0 : holes === 'magnet' ? MAGNET_H : SCREW_H;
+  return Math.max(FLOOR_MIN, hole + HOLE_FLOOR);
+}
+
+/** Deepest pocket a `u`-unit bin can hold, measured from the pocket opening (0 at 1U with the lip). */
+export function maxDepth(u: number, o: BaseOptions = {}): number {
+  return Math.max(0, u * UHT - recess(o) - floorMin(o));
 }
 
 /** The pocket depth actually cut for a requested depth at height `u`. */
-export function effectiveDepth(u: number, depth: number): number {
-  return Math.max(0, Math.min(depth, maxDepth(u)));
+export function effectiveDepth(u: number, depth: number, o: BaseOptions = {}): number {
+  return Math.max(0, Math.min(depth, maxDepth(u, o)));
 }

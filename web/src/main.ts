@@ -7,6 +7,7 @@ import { maxDepth } from './geometry/pocket';
 import { clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
 import { loadUploads, removeUpload, saveUpload, touchUpload } from './storage';
 import { writeStl } from './stl';
+import { traceDxf, traceSvg, type TraceLayers } from './trace-export';
 import { isDark, TraceView } from './trace';
 import { decodePhoto } from './vision/decode';
 import { modelCached } from './vision/model';
@@ -37,6 +38,9 @@ function state(): Params {
     depth: +input('depth').value,
     fillet: +input('fillet').value,
     bfillet: +input('bfillet').value,
+    holes: $<HTMLSelectElement>('holes').value as Params['holes'],
+    holesCorners: input('holesCorners').checked,
+    lip: input('lip').checked,
   });
 }
 
@@ -357,17 +361,7 @@ function syncExport(): void {
 function saveStl(): void {
   const cur = exportable();
   if (!cur) return;
-  const blob = new Blob([writeStl(cur.bin.positions, cur.bin.indices)], { type: 'model/stl' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `gridfinity_${cur.tool}.stl`;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    a.remove();
-    URL.revokeObjectURL(url);
-  }, 1500);
+  download(new Blob([writeStl(cur.bin.positions, cur.bin.indices)], { type: 'model/stl' }), `gridfinity_${cur.tool}.stl`);
 }
 expBtn.addEventListener('click', () => {
   exportWanted = true;
@@ -377,6 +371,34 @@ expBtn.addEventListener('click', () => {
 let tooLarge = false;
 /** The latest outline refresh; a build waits for it so it sees the current footprint. */
 let pendingOutline: Promise<void> = Promise.resolve();
+
+// ---- trace export: the current outline and pocket as SVG or DXF (1:1 mm)
+let lastTrace: { tool: string; layers: TraceLayers } | null = null;
+function syncTraceExport(): void {
+  for (const id of ['expSvg', 'expDxf']) $<HTMLButtonElement>(id).disabled = !lastTrace;
+}
+function download(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a); // Safari ignores clicks on detached anchors
+  a.click();
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 1500);
+}
+async function saveTrace(kind: 'svg' | 'dxf'): Promise<void> {
+  await pendingOutline; // the outline for the latest settings
+  if (!lastTrace) return;
+  const label = toolMenu.selectedOptions[0]?.textContent ?? lastTrace.tool;
+  const base = `trace_${lastTrace.tool}`;
+  if (kind === 'svg') download(new Blob([traceSvg(lastTrace.layers, label)], { type: 'image/svg+xml' }), `${base}.svg`);
+  else download(new Blob([traceDxf(lastTrace.layers)], { type: 'application/dxf' }), `${base}.dxf`);
+}
+$('expSvg').addEventListener('click', () => void saveTrace('svg'));
+$('expDxf').addEventListener('click', () => void saveTrace('dxf'));
 
 /** Below this mirror IoU, "Symmetric tool" warns that the pocket will be wider than the tool. */
 const SYMMETRIC_SCORE = 0.92;
@@ -401,6 +423,8 @@ async function refreshOutline(): Promise<void> {
       'Try a smaller rotation or clearance.';
   }
   trace.show(r);
+  lastTrace = { tool: p.tool, layers: { tool: r.tool, pocket: r.pocket } };
+  syncTraceExport();
 }
 
 let busy = false;
@@ -464,8 +488,9 @@ const syncP = (el: HTMLInputElement) => {
 /** Depth slider: capped to the deepest pocket the current height allows, showing the depth that will be cut. */
 function syncDepth(): void {
   const el = input('depth');
-  const u = state().u;
-  const deepest = maxDepth(u);
+  const p = state();
+  const u = p.u;
+  const deepest = maxDepth(u, p);
   const min = Math.min(3, deepest);
   el.min = String(min);
   el.max = String(min + Math.ceil((deepest - min) / 0.5) * 0.5); // step-aligned, so the slider can reach `deepest`
@@ -500,6 +525,17 @@ input('depth').addEventListener('input', () => {
   changed();
 });
 input('slotOn').addEventListener('change', changed);
+$('holes').addEventListener('change', () => {
+  input('holesCorners').disabled = $<HTMLSelectElement>('holes').value === 'none';
+  syncDepth();
+  changed();
+});
+input('holesCorners').disabled = true;
+input('holesCorners').addEventListener('change', changed);
+input('lip').addEventListener('change', () => {
+  syncDepth();
+  changed();
+});
 input('sym').addEventListener('change', changed);
 /** Switch defaults and the Remove row for the selected tool. */
 function applyToolDefaults(): void {

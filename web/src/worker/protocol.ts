@@ -1,7 +1,7 @@
 // Typed request/response protocol between the UI thread and the pipeline worker.
 // Every request carries a per-kind `version`; the client drops responses to requests
 // that a newer request of the same kind has superseded.
-import type { Ring } from '../geometry/pocket';
+import type { Ring, Vec2 } from '../geometry/pocket';
 import type { Params } from '../params';
 import type { Affine } from '../vision/outline';
 import type { Box, RGBAImage } from '../vision/sheet';
@@ -20,6 +20,8 @@ export interface OutlineResult {
   /** Tool and pocket (unrotated) in sheet mm, for drawing on the sheet image. */
   sheetTool: Ring;
   sheetPocket: Ring;
+  /** With "Symmetric tool" on: the mirror axis as a segment spanning the tool, in sheet mm. */
+  sheetAxis?: [Vec2, Vec2];
   /** Sheet-mm extent [x0, y0, x1, y1] of the sheet image. */
   sheetBox: [number, number, number, number];
   /** URL of the sheet image, relative to the app's base URL. */

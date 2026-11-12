@@ -39,6 +39,8 @@ def build_preset(tool):
         "outline_mm": r4(a.outline),
         "symmetric_outline_mm": r4(sym.outline),
         "symmetry_score": r4(sym.score),
+        # the mirror axis passes through centre + offset * (cos a, sin a), a = deg from the y axis
+        "symmetry_axis": {"deg": r4(sym.axis_deg), "offset": r4(sym.offset), "centre": r4(list(sym.centre))},
         "up2sheet": r4(aff),
         "sheet_box_mm": r4(box),
         "sheet_image": f"{tool}-sheet.jpg",

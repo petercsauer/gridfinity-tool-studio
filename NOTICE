@@ -27,12 +27,11 @@ onnxruntime-web (https://github.com/microsoft/onnxruntime)
   MIT License, Copyright (c) Microsoft Corporation. The JavaScript is bundled;
   its WebAssembly files are fetched at runtime from cdn.jsdelivr.net.
 
-heic2any (https://github.com/alexcorvi/heic2any)
-  MIT License, Copyright (c) 2020 Alex Corvi.
-  heic2any includes libheif (https://github.com/strukturag/libheif), licensed
-  under the GNU Lesser General Public License v3.0. It is shipped unmodified,
-  inside heic2any's own separately loaded file (dist/assets/heic2any-*.js),
-  which can be replaced with another build of heic2any/libheif.
+heic-to (https://github.com/hoppergee/heic-to)
+  GNU Lesser General Public License v3.0. heic-to is a build of libheif
+  (https://github.com/strukturag/libheif, also LGPL-3.0). It is shipped
+  unmodified, in its own separately loaded file (dist/assets/heic-to-*.js),
+  which can be replaced with another build of heic-to/libheif.
 
 idb-keyval (https://github.com/jakearchibald/idb-keyval)
   Apache License 2.0, Copyright 2016 Jake Archibald.

@@ -49,16 +49,24 @@ which takes some seconds per photo.
 | Depth | How deep the tool pocket is |
 | Top fillet | Rounded lead‑in at the pocket opening |
 | Bottom round | Rounds the pocket floor into the walls |
+| Holes | Base holes per gridfinity cell corner: 6×2 mm magnets (6.5 × 2.4 mm), M3 screws (3 × 6 mm) or both |
+| Corners only | Puts the holes only at the bin's four outer corners |
+| Stacking lip | The rim that lets bins stack; off gives a flat top and 4.4 mm more pocket depth |
 
 Bins use the standard gridfinity 42 mm grid, base profile and stacking lip, and the footprint grows in whole
-cells to fit the pocket. The 3D preview keeps your camera angle between rebuilds; double‑click it to re‑frame.
+cells to fit the pocket. Screw holes raise the lowest pocket floor to 6.8 mm so the pocket can't break into
+them. The 3D preview keeps your camera angle between rebuilds; double‑click it to re‑frame.
+
+**Trace outline › SVG / DXF** saves the traced outline and the pocket (clearance plus finger slot) at 1:1 in
+millimetres, on separate layers, for laser‑cutting foam inserts or drawing your own bin in CAD. DXF is R12,
+which AutoCAD, Fusion, Onshape and LightBurn all open; DWG isn't offered because it's a closed format.
 
 ## How it works
 
 The app in `web/` is a static site (Vite + TypeScript). The UI is `web/index.html`, `web/src/styles.css` and
 `web/src/main.ts`; the pipeline runs in a Web Worker (`web/src/worker/`).
 
-1. **Decode:** JPEG/PNG through the browser, HEIC through heic2any (`web/src/vision/decode.ts`).
+1. **Decode:** JPEG/PNG through the browser, HEIC through heic-to, a current libheif build (`web/src/vision/decode.ts`).
 2. **Sheet:** ArUco markers (OpenCV.js, 4×4 dictionary) → homography to sheet millimetres
    (`web/src/vision/sheet.ts`).
 3. **Cut‑out:** IS‑Net (fp16 ONNX, onnxruntime‑web on WebGPU or WASM) on the perspective‑corrected page, then
@@ -71,7 +79,8 @@ The app in `web/` is a static site (Vite + TypeScript). The UI is `web/index.htm
    (`web/src/geometry/bin.ts`). Three.js draws the preview.
 
 The Python package in `src/gts/` is the reference implementation the browser port was checked against; the
-JSON fixtures in `tests/fixtures/` pin the two to the same results.
+JSON fixtures in `tests/fixtures/` pin the two to the same results. Base holes and the lip toggle exist only in
+the browser app.
 
 ## Developing the web app
 

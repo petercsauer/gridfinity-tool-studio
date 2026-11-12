@@ -1,8 +1,8 @@
 // Watertight gridfinity bin with a tool pocket, built with manifold-3d.
 // Mirrors genbin in src/gts/bin.py (kennetek standard.scad dimensions).
 import type { CrossSection, Manifold, ManifoldToplevel } from 'manifold-3d';
-import { FLOOR_MIN, GAP, GRID, RECESS, UHT } from './constants';
-import { ccw, signedArea, type Ring, type Vec2 } from './pocket';
+import { GAP, GRID, HOLE_FROM_SIDE, MAGNET_D, MAGNET_H, SCREW_D, SCREW_H, UHT } from './constants';
+import { ccw, floorMin, recess, signedArea, type HoleStyle, type Ring, type Vec2 } from './pocket';
 
 /** Top radius of the outer wall and the foot pads (bottom, middle, top sizes and radii). */
 const R_TOP = 3.75;
@@ -17,8 +17,9 @@ const LEAD = 1.4;
 /** Layers in each stepped round-over, and segments per circle for its offsets (shapely quad_segs=24). */
 const STEPS = 16;
 const ROUND_SEGMENTS = 96;
-/** Segments per circle of the rounded-rectangle corners. */
+/** Segments per circle of the rounded-rectangle corners and the base holes. */
 const RECT_SEGMENTS = 48;
+const HOLE_SEGMENTS = 48;
 /** Vertices closer than this (mm) are merged in the final mesh, as in the Python reference. */
 const SIMPLIFY_TOL = 1e-3;
 
@@ -30,6 +31,11 @@ export interface BinParams {
   /** Top round-over and bottom round radii (mm). */
   fillet: number;
   bfillet: number;
+  /** Holes in the base (default none) and whether only the bin's four outer corners get them. */
+  holes?: HoleStyle;
+  holesCorners?: boolean;
+  /** Stacking lip on top (default on). */
+  lip?: boolean;
 }
 
 export interface BinMesh {
@@ -90,8 +96,8 @@ export function genbinManifold(
     const top = p.u * UHT;
     const Dx = GRID * nx - GAP;
     const Dy = GRID * ny - GAP;
-    const recessZ = top - RECESS; // the pocket opens at the lip trough floor
-    const floorTop = Math.max(FLOOR_MIN, recessZ - p.depth);
+    const recessZ = top - recess(p); // the pocket opens at the lip trough floor (or the top, lip off)
+    const floorTop = Math.max(floorMin(p), recessZ - p.depth);
 
     const foot = s.keep(Manifold.union([
       frustum(PAD_BOT, R_BOT, 0, PAD_MID, R_MID, 0.8),
@@ -106,10 +112,31 @@ export function genbinManifold(
     }
     const solid = s.keep(Manifold.union(parts));
     // stacking lip: chamfered perimeter trough
-    const lip = s.keep(Manifold.hull([
+    const lip = p.lip === false ? null : s.keep(Manifold.hull([
       slab(rr(Dx - 2 * RIM - 2 * LEAD, Dy - 2 * RIM - 2 * LEAD, Math.max(0.3, R_TOP - RIM - LEAD)), top - 4.4, top - 4.38),
       slab(rr(Dx - 2 * RIM, Dy - 2 * RIM, Math.max(0.3, R_TOP - RIM)), top - 3, top + 1),
     ]));
+    // base holes, open at the bottom of each foot: a magnet pocket and/or a screw hole per cell corner
+    const holes = p.holes ?? 'none';
+    const holeCutters: Manifold[] = [];
+    if (holes !== 'none') {
+      const cyl = (d: number, h: number) => s.keep(s.keep(Manifold.cylinder(h + 0.01, d / 2, d / 2, HOLE_SEGMENTS)).translate([0, 0, -0.01]));
+      const shapes: Manifold[] = [];
+      if (holes === 'magnet' || holes === 'both') shapes.push(cyl(MAGNET_D, MAGNET_H));
+      if (holes === 'screw' || holes === 'both') shapes.push(cyl(SCREW_D, SCREW_H));
+      const hole = shapes.length === 1 ? shapes[0]! : s.keep(Manifold.union(shapes));
+      const o = GRID / 2 - HOLE_FROM_SIDE;
+      for (let i = 0; i < nx; i++) {
+        for (let j = 0; j < ny; j++) {
+          const cx = (i + 0.5) * GRID - (GRID * nx) / 2, cy = (j + 0.5) * GRID - (GRID * ny) / 2;
+          for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+            // corners only: the hole nearest each of the bin's four outer corners
+            if (p.holesCorners && !((sx < 0 ? i === 0 : i === nx - 1) && (sy < 0 ? j === 0 : j === ny - 1))) continue;
+            holeCutters.push(s.keep(hole.translate([cx + sx * o, cy + sy * o, 0])));
+          }
+        }
+      }
+    }
 
     // tool pocket, with round-overs that follow the actual outline (stepped offset layers,
     // no convex hull: a hull would fill the concave jaw/handle gaps)
@@ -147,8 +174,9 @@ export function genbinManifold(
       }
     }
     const cutter = s.keep(Manifold.union(cutters));
-    const shell = s.keep(solid.subtract(lip));
-    const raw = s.keep(shell.subtract(cutter));
+    const shell = lip ? s.keep(solid.subtract(lip)) : solid;
+    const cut = holeCutters.length ? s.keep(Manifold.union([cutter, ...holeCutters])) : cutter;
+    const raw = s.keep(shell.subtract(cut));
     // merge near-coincident vertices left where the stepped round-over layers meet; without
     // this, STL readers that weld vertices by position see zero-volume slivers
     const bin = raw.simplify(SIMPLIFY_TOL);
@@ -174,7 +202,7 @@ function outerContour(cs: CrossSection): Vec2[] {
 }
 
 /** Build an `nx` x `ny` cell, `u`-unit bin with `pocket` (mm, centred on the origin) cut below
- * the stacking-lip recess, as triangle arrays. The depth is limited to maxDepth(u). */
+ * the stacking-lip recess, as triangle arrays. The depth is limited to maxDepth(u, p). */
 export function genbin(m: ManifoldToplevel, pocket: Ring, nx: number, ny: number, p: BinParams): BinMesh {
   const { bin, effectiveDepth } = genbinManifold(m, pocket, nx, ny, p);
   try {

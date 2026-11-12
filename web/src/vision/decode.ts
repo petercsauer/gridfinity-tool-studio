@@ -1,6 +1,6 @@
 // Photo decoding: File/Blob to RGBA pixels, downscaled so the long side is at most MAX_SIDE px.
 // Uses the browser's decoder (createImageBitmap, EXIF orientation applied); HEIC/HEIF photos the browser can't
-// decode are converted to JPEG by heic2any, loaded lazily as its own chunk. heic2any needs `window` and
+// decode are converted to JPEG by heic-to, loaded lazily as its own chunk. heic-to needs `window` and
 // `document`, so HEIC fallback works only on the UI thread; everything else works in a worker too.
 import { PipelineError } from '../worker/protocol';
 
@@ -28,9 +28,10 @@ export interface DecodeEnv {
 }
 
 async function heicToJpeg(blob: Blob): Promise<Blob> {
-  const { default: heic2any } = await import('heic2any');
-  const out = await heic2any({ blob, toType: 'image/jpeg', quality: 0.95 });
-  return Array.isArray(out) ? out[0]! : out;
+  // heic-to tracks current libheif releases (heic2any's 2023 libheif can't parse recent iPhone photos);
+  // the /csp build avoids eval so the site's Content-Security-Policy can stay strict.
+  const { heicTo } = await import('heic-to/csp');
+  return heicTo({ blob, type: 'image/jpeg', quality: 0.95 });
 }
 
 function rasterize(bitmap: ImageBitmap, w: number, h: number): ImageData {

@@ -1,5 +1,6 @@
 // Built-in presets: static JSON written by scripts/build_presets.py into public/presets/.
-import type { Ring } from '../geometry/pocket';
+import type { Ring, Vec2 } from '../geometry/pocket';
+import { centroid } from '../vision/symmetry';
 import { PipelineError, type StoredTool, type ToolInfo } from './protocol';
 
 export interface PresetData {
@@ -12,6 +13,8 @@ export interface PresetData {
   outline_mm: Ring;
   symmetric_outline_mm: Ring;
   symmetry_score: number;
+  /** The mirror axis: through centre + offset * (cos a, sin a), at a = deg from the y axis (outline mm). */
+  symmetry_axis?: { deg: number; offset: number; centre: Vec2 };
   /** 2x3 affine [A | b] from outline mm to sheet mm: sheet = A q + b. */
   up2sheet: [[number, number, number], [number, number, number]];
   /** Sheet-mm extent [x0, y0, x1, y1] of the sheet image. */
@@ -43,6 +46,7 @@ export function uploadAsPreset(t: StoredTool): PresetData {
     outline_mm: t.outline,
     symmetric_outline_mm: t.symmetry.outline,
     symmetry_score: t.symmetry.score,
+    symmetry_axis: { deg: t.symmetry.axisDeg, offset: t.symmetry.offset, centre: centroid(t.outline) },
     up2sheet: t.up2sheet,
     sheet_box_mm: t.sheetBox,
     sheet_image: t.sheetImage,
