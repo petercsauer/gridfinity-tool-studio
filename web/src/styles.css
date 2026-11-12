@@ -288,6 +288,11 @@ section.view.preview{background:radial-gradient(ellipse farthest-side at 50% 45%
   transition:transform var(--dur-release) var(--ease-press), background var(--dur-fast) var(--ease-ca)}
 #gen svg{width:15px;height:15px}
 #gen:hover{background:var(--fill-pressed)}
+.coffee{margin-left:auto;width:34px;height:34px;flex:none;border-radius:17px;display:grid;place-items:center;
+  background:var(--fill);color:var(--label);text-decoration:none;transition:transform var(--dur-press) ease-out}
+.coffee svg{width:17px;height:17px}
+.coffee:hover{background:var(--fill-pressed);color:var(--accent)}
+.coffee:active{transform:scale(.94)}
 #gen:active{background:var(--fill);transform:scale(.94);transition:transform var(--dur-press) ease-out}
 
 #spin{display:none;grid-auto-flow:column;align-items:center;gap:6px;padding:0 6px 0 8px;font:var(--t-subhead);color:var(--label-2);
