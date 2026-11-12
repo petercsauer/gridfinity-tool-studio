@@ -4,7 +4,7 @@ import { noEval } from './vite.no-eval.ts';
 
 export default defineConfig({
   base: './',
-  // no runtime code generation in opencv.js and heic2any, so the CSP needs no 'unsafe-eval' (see vite.no-eval.ts)
+  // no runtime code generation in opencv.js (and none in heic-to's CSP build), so the CSP needs no 'unsafe-eval' (see vite.no-eval.ts)
   plugins: [noEval()],
   worker: { format: 'es', plugins: () => [noEval()] },
   // onnxruntime-web without its ~30 MB wasm bundled: src/vision/model.ts loads it from jsDelivr instead

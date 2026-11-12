@@ -94,7 +94,7 @@ test('uploads download the real model and are traced (JPEG, then HEIC)', async (
   await open(page);
   await upload(page, STRIPPER, 'stripper');
   await page.screenshot({ path: test.info().outputPath('live-upload.png') });
-  // HEIC goes through heic2any on the UI thread (Chrome can't decode it), with its own blob worker
+  // HEIC goes through heic-to on the UI thread (Chrome can't decode it), with its own blob worker
   const heic = join(tmpdir(), 'gts-live-stripper.heic');
   try { execFileSync('sips', ['-s', 'format', 'heic', STRIPPER, '--out', heic], { stdio: 'ignore' }); } catch { /* no sips */ }
   if (existsSync(heic)) await upload(page, heic, 'gts-live-stripper');

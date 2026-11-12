@@ -1,11 +1,11 @@
-// A Vite plugin that removes runtime code generation (new Function) from two prebuilt Emscripten bundles, so the
+// A Vite plugin that removes runtime code generation (new Function) from prebuilt Emscripten bundles, so the
 // production Content-Security-Policy can leave out 'unsafe-eval'. Each patch swaps one generated-code helper for
 // an equivalent closure; a patch whose source text isn't found fails the build, so a dependency upgrade can't
 // silently bring eval back.
 //
 // - opencv.js (@techstark/opencv-js): embind's createJsInvoker (every bound function and method, built at module
 //   init) and __emval_create_invoker (calls into JS values from C++).
-// - heic2any: libheif's createNamedFunction, craftInvokerFunction and makeDynCaller, inside the worker source it ships as a string.
+// - heic-to: its CSP build already has no eval; it's only checked, so an upgrade can't bring eval back.
 import type { Plugin } from 'vite';
 
 /** Replace `find` (through the end of `until`, when given) with `replace`. */
@@ -41,36 +41,6 @@ const OPENCV: Patch[] = [
   },
 ];
 
-// heic2any's worker is a string literal in the bundle, so its quotes appear escaped (\") here.
-const HEIC2ANY: Patch[] = [
-  {
-    find: 'function QA(A,e){return A=YA(A),new Function(\\"body\\",\\"return function \\"+A+\'() {\\\\n    \\"use strict\\";    return body.apply(this, arguments);\\\\n};\\\\n\')(e)}',
-    replace: 'function QA(A,e){return function(){return e.apply(this,arguments)}}',
-  },
-  {
-    find: 'function QA(A,e){return A=YA(A=A||\\"function_\\"+new Date),new Function(\\"body\\",\\"return function \\"+A+\'() {\\\\n    \\"use strict\\";    return body.apply(this, arguments);\\\\n};\\\\n\')(e)}',
-    replace: 'function QA(A,e){return function(){return e.apply(this,arguments)}}',
-  },
-  {
-    // craftInvokerFunction(humanName, argTypes, classType, cppInvokerFunc, cppTargetFunc), older embind
-    find: 'function xe(A,e,r,i,f){',
-    until: 'He(Function,d).apply(null,k)}',
-    replace: 'function xe(A,e,r,i,f){var n=e.length;n<2&&HA(\'argTypes array size mismatch!\');'
-      + 'for(var t=null!==e[1]&&null!==r,o=!1,a=1;a<e.length;++a)if(null!==e[a]&&void 0===e[a].destructorFunction){o=!0;break}'
-      + 'var c=\'void\'!==e[0].name;'
-      + 'return function(){if(arguments.length!==n-2)HA(\'function \'+A+\' called with \'+arguments.length+\' arguments, expected \'+(n-2)+\' args!\');'
-      + 'var s=o?[]:null,w=[f],th;if(t){th=e[1].toWireType(s,this);w.push(th)}'
-      + 'for(var a=0;a<n-2;++a)w.push(e[a+2].toWireType(s,arguments[a]));'
-      + 'var rv=i.apply(null,w);'
-      + 'if(o)CA(s);else for(a=t?1:2;a<e.length;++a){if(null!==e[a].destructorFunction)e[a].destructorFunction(1===a?th:w[(t?2:1)+a-2])}'
-      + 'if(c)return e[0].fromWireType(rv)}}',
-  },
-  {
-    find: 'new Function(\\"dynCall\\",\\"rawFunction\\",i)(A,n)',
-    replace: 'function(){var t=[n];for(var k=0;k<arguments.length;k++)t.push(arguments[k]);return A.apply(null,t)}',
-  },
-];
-
 function apply(code: string, patches: Patch[], name: string): string {
   for (const { find, until, replace } of patches) {
     const at = code.indexOf(find);
@@ -95,7 +65,7 @@ export function noEval(): Plugin {
     enforce: 'pre',
     transform(code, id) {
       if (/[\\/]@techstark[\\/]opencv-js[\\/]dist[\\/]opencv\.js$/.test(id)) return { code: apply(code, OPENCV, 'opencv.js'), map: null };
-      if (/[\\/]heic2any[\\/]dist[\\/]heic2any\.js$/.test(id)) return { code: apply(code, HEIC2ANY, 'heic2any.js'), map: null };
+      if (/[\\/]heic-to[\\/]dist[\\/]csp[\\/]heic-to\.js$/.test(id)) return { code: apply(code, [], 'heic-to (csp)'), map: null };
       return null;
     },
   };

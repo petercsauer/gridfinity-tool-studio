@@ -41,9 +41,10 @@ Local `vite dev` and `vite preview` send no cross‑origin isolation (COOP/COEP)
 single‑threaded. That is expected; the production headers (COOP, COEP, CSP) live in `web/public/_headers`.
 To try them locally, serve the build with `npx wrangler pages dev dist` from `web/`.
 
-The CSP has no `'unsafe-eval'`. opencv.js and heic2any generate code with `new Function` at runtime, so
+The CSP has no `'unsafe-eval'`. opencv.js generates code with `new Function` at runtime, so
 `web/vite.no-eval.ts` patches those helpers into plain closures at build time; it fails the build if a dependency
-upgrade changes the patched code.
+upgrade changes the patched code. HEIC goes through heic-to's CSP build, which has no eval; the plugin checks that
+it stays that way.
 
 ## Deploying
 
