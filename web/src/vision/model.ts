@@ -56,9 +56,9 @@ export async function loadModel(onProgress?: Progress): Promise<Uint8Array<Array
   try {
     res = await fetch(MODEL_URL, { redirect: 'follow' });
   } catch {
-    throw new PipelineError('internal', 'Couldn\'t download the background-removal model. Check your connection and try again.');
+    throw new PipelineError('model', 'Couldn\'t download the background-removal model. Check your connection and try again.');
   }
-  if (!res.ok) throw new PipelineError('internal', `Couldn't download the background-removal model (HTTP ${res.status}).`);
+  if (!res.ok) throw new PipelineError('model', `Couldn't download the background-removal model (HTTP ${res.status}).`);
   const bytes = await readAll(res, onProgress);
   await cache?.put(MODEL_URL, new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } }));
   return bytes;

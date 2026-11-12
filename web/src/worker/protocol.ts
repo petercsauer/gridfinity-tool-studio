@@ -1,7 +1,7 @@
 // Typed request/response protocol between the UI thread and the pipeline worker.
 // Every request carries a per-kind `version`; the client drops responses to requests
 // that a newer request of the same kind has superseded.
-import type { Ring, Vec2 } from '../geometry/pocket';
+import type { Box2, Ring, Vec2 } from '../geometry/pocket';
 import type { Params } from '../params';
 import type { Affine } from '../vision/outline';
 import type { Box, RGBAImage } from '../vision/sheet';
@@ -36,6 +36,23 @@ export interface OutlineResult {
   effectiveDepth: number;
   /** How symmetric the tool is (mirror IoU, 1 = perfectly). */
   symmetryScore: number;
+  /** Pocket and tool sizes along the tool's own upright axes, for the dimension labels on the trace. */
+  measure?: Measurements;
+}
+
+/** The unrotated pocket and tool measured in the upright outline frame (x across the tool, y along it). */
+export interface Measurements {
+  /** Bounding boxes of the pocket and the tool in that frame (mm). */
+  pocket: Box2;
+  tool: Box2;
+  /** 2x3 affine [A | b] from that frame to sheet mm, to draw the boxes' sides on the sheet. */
+  up2sheet: Affine;
+  /** Pocket and tool width (x) and length (y) in mm, to 0.1 mm. */
+  pocketSize: [number, number];
+  toolSize: [number, number];
+  /** Clearance on each side: from the tool's box to the pocket's box (mm, to 0.1 mm). Differs per side when
+   * the finger slot sticks out. */
+  gaps: { xmin: number; xmax: number; ymin: number; ymax: number };
 }
 
 export interface BuildResult {
@@ -104,9 +121,24 @@ export type Request<K extends Kind = Kind> = K extends Kind
   : never;
 
 /** `no-sheet`: the calibration markers weren't all found; `no-tool`: nothing on the sheet; `cut-off`: part of
- * the tool is outside the photo. */
+ * the tool is outside the photo; `model`: the background-removal model couldn't be downloaded or run;
+ * `memory`: the browser ran out of memory. */
 export type ErrorCode = 'not-implemented' | 'unknown-tool' | 'too-large' | 'invalid' | 'no-sheet' | 'no-tool' | 'cut-off'
-  | 'internal';
+  | 'model' | 'memory' | 'internal';
+
+/** Whether an error looks like the browser running out of memory: a failed ArrayBuffer or WebAssembly memory
+ * allocation, an Emscripten OOM abort, or onnxruntime failing to allocate a tensor. Checks the message too,
+ * since errors from the worker arrive as text. */
+export function isOutOfMemory(e: unknown): boolean {
+  const text = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+  return /out of memory|\bOOM\b|allocation failed|(failed|unable|could not|cannot|can't) (to )?allocate|cannot enlarge memory|memory\.grow|maximum memory size/i
+    .test(text);
+}
+
+/** A PipelineError for an out-of-memory error. */
+export function memoryError(): PipelineError {
+  return new PipelineError('memory', 'This device ran out of memory. Close other tabs or apps and try again, or use a smaller photo.');
+}
 
 export type Response<K extends Kind = Kind> = K extends Kind
   ? | { id: number; kind: K; version: number; ok: true; result: Results[K] }

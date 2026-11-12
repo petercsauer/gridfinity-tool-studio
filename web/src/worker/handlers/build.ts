@@ -10,7 +10,7 @@ export async function build(raw: Params, { manifold, presets }: Deps): Promise<B
   const preset = await presets.get(p.tool);
   const P0 = p.sym ? preset.symmetric_outline_mm : preset.outline_mm;
   const { pocket } = makePocket(manifold, rotate(P0, p.rot), p);
-  const [nx, ny] = footprint(pocket, p.fillet);
+  const [nx, ny] = footprint(pocket, p.fillet, p.halfGrid);
   if (nx > MAX_CELLS || ny > MAX_CELLS) {
     throw new PipelineError('too-large', `This tool needs a ${nx}×${ny} bin; the largest is ${MAX_CELLS}×${MAX_CELLS}.`);
   }

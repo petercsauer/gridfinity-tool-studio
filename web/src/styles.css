@@ -210,6 +210,8 @@ input[type=checkbox][role=switch]:checked{background:var(--accent)}
 input[type=checkbox][role=switch]:checked::before{transform:translateX(14px)}
 input[type=checkbox][role=switch]:active::before{width:24px}
 input[type=checkbox][role=switch]:checked:active::before{transform:translateX(10px)}
+input[type=checkbox][role=switch]:disabled, #holes:disabled{opacity:.45}
+.row:has(> :disabled) > label{color:var(--label-2)}
 
 /* ---- pop-up ---- */
 #tool, #holes{-webkit-appearance:none;appearance:none;height:var(--ctl-h);max-width:170px;flex:0 1 170px;min-width:0;

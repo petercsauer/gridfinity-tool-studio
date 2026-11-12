@@ -105,6 +105,7 @@
         <div class="ticks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       </div>
     </div>
+    <div class="footer num" id="pocketDims" title="Measured along the tool’s own axes, as on the trace"></div>
 
     <h2 class="section">Finger slot</h2>
     <div class="card">
@@ -153,8 +154,10 @@
       </select></div>
       <div class="row" title="Holes only at the bin’s four outer corners"><label for="holesCorners">Corners only</label><input type="checkbox" id="holesCorners" role="switch"></div>
       <div class="row" title="The rim that lets bins stack; off gives a flat top and a deeper pocket"><label for="lip">Stacking lip</label><input type="checkbox" id="lip" role="switch" checked></div>
+      <div class="row" title="Feet on a 21 mm half grid, so the bin can be 1.5, 2.5… units wide; still fits a standard 42 mm baseplate"><label for="halfGrid">Half-grid feet</label><input type="checkbox" id="halfGrid" role="switch"></div>
     </div>
-    <div class="footer">Magnet holes are 6.5 mm wide and 2.4 mm deep, screw holes 3 mm by 6 mm, per the gridfinity standard.</div>
+    <div class="footer" id="holesNote">Magnet holes are 6.5 mm wide and 2.4 mm deep, screw holes 3 mm by 6 mm, per the gridfinity standard.</div>
+    <div class="footer" id="halfGridNote" hidden>Magnet and screw holes need full 42 mm feet, so half-grid bins have none.</div>
 
     <h2 class="section">Edges</h2>
     <div class="card">

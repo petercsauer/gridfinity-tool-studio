@@ -3,10 +3,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { maxDepth } from './geometry/pocket';
+import { binSize, maxDepth } from './geometry/pocket';
 import { clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
 import { loadUploads, removeUpload, saveUpload, touchUpload } from './storage';
-import { count } from './count';
+import { count, uploadErrorEvent } from './count';
 import { writeStl } from './stl';
 import { traceDxf, traceSvg, type TraceLayers } from './trace-export';
 import { isDark, TraceView } from './trace';
@@ -42,6 +42,7 @@ function state(): Params {
     holes: $<HTMLSelectElement>('holes').value as Params['holes'],
     holesCorners: input('holesCorners').checked,
     lip: input('lip').checked,
+    halfGrid: input('halfGrid').checked,
   });
 }
 
@@ -416,9 +417,13 @@ async function refreshOutline(): Promise<void> {
     return;
   }
   if (!r) return; // superseded by a newer change
-  $('cells').textContent = `${r.nx}×${r.ny}`;
+  $('cells').textContent = `${r.nx}×${r.ny}`; // half cells show as 1.5, 2.5…
   $('pdim').textContent = `${r.w}×${r.h} mm`;
-  $('bdim').textContent = `${(r.nx * 42 - 0.5).toFixed(0)}×${(r.ny * 42 - 0.5).toFixed(0)}×${(p.u * 7).toFixed(0)} mm`;
+  $('bdim').textContent = `${binSize(r.nx).toFixed(0)}×${binSize(r.ny).toFixed(0)}×${(p.u * 7).toFixed(0)} mm`;
+  const m = r.measure;
+  $('pocketDims').textContent = m
+    ? `Pocket ${m.pocketSize[0].toFixed(1)} × ${m.pocketSize[1].toFixed(1)} mm · tool ${m.toolSize[0].toFixed(1)} × ${m.toolSize[1].toFixed(1)} mm`
+    : '';
   $('symNote').hidden = !(p.sym && r.symmetryScore < SYMMETRIC_SCORE);
   tooLarge = r.nx > MAX_CELLS || r.ny > MAX_CELLS;
   if (tooLarge) {
@@ -528,13 +533,26 @@ input('depth').addEventListener('input', () => {
   changed();
 });
 input('slotOn').addEventListener('change', changed);
+/** Holes and Corners only: unavailable with half-grid feet, and Corners only needs a hole style. */
+function syncBase(): void {
+  const half = input('halfGrid').checked;
+  $<HTMLSelectElement>('holes').disabled = half;
+  input('holesCorners').disabled = half || $<HTMLSelectElement>('holes').value === 'none';
+  $('holesNote').hidden = half;
+  $('halfGridNote').hidden = !half;
+}
 $('holes').addEventListener('change', () => {
-  input('holesCorners').disabled = $<HTMLSelectElement>('holes').value === 'none';
+  syncBase();
   syncDepth();
   changed();
 });
-input('holesCorners').disabled = true;
+syncBase();
 input('holesCorners').addEventListener('change', changed);
+input('halfGrid').addEventListener('change', () => {
+  syncBase();
+  syncDepth();
+  changed();
+});
 input('lip').addEventListener('change', () => {
   syncDepth();
   changed();
@@ -590,6 +608,8 @@ function showProgress(p: Progress): void {
   else if (p.loaded < p.total) say(`Downloading the AI model… ${Math.floor((p.loaded / p.total) * 100)}%`);
   else say('Tracing…');
 }
+/** Where an upload is: set while the photo is decoded, so a failure there is counted as a decode error. */
+const uploadStage = { decoding: false };
 async function uploadPhoto(file: File): Promise<void> {
   if (!modelConsent && !(await modelCached().catch(() => false))) {
     say('');
@@ -602,7 +622,9 @@ async function uploadPhoto(file: File): Promise<void> {
     modelConsent = true;
   }
   say('Reading the photo…');
+  uploadStage.decoding = true;
   const image = await decodePhoto(file, file.name);
+  uploadStage.decoding = false;
   const name = file.name.replace(/\.[^.]+$/, '').slice(0, 40);
   const t = await client.request('upload', { image, name }, [image.data.buffer], showProgress);
   if (!t) return;
@@ -626,12 +648,11 @@ input('upFile').addEventListener('change', async () => {
   if (!file) return;
   upBtn.disabled = true;
   count('upload-start');
+  uploadStage.decoding = false;
   try {
     await uploadPhoto(file);
   } catch (e) {
-    const code = e instanceof PipelineError ? e.code : '';
-    count(code === 'no-sheet' ? 'upload-no-sheet' : code === 'no-tool' ? 'upload-no-tool'
-      : code === 'cut-off' ? 'upload-cut-off' : 'upload-error');
+    count(uploadErrorEvent(e, uploadStage.decoding));
     say(errorText(e), 'error');
   } finally {
     upBtn.disabled = false;

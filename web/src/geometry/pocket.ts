@@ -150,12 +150,20 @@ export function makePocket(m: ManifoldToplevel, P: Ring, p: PocketParams): Pocke
   }
 }
 
-/** Bin footprint in whole grid cells [nx, ny] that holds the pocket with its top round-over:
- * per axis `need = extent + 2*fillet + 2*(LIP_INSET + MIN_WALL) + GAP`, `n = ceil(need / GRID)`. */
-export function footprint(pocket: Ring, fillet: number): [number, number] {
+/** Bin footprint [nx, ny] in grid units that holds the pocket with its top round-over:
+ * per axis `need = extent + 2*fillet + 2*(LIP_INSET + MIN_WALL) + GAP`, `n = ceil(need / GRID)`.
+ * With `halfGrid` the footprint grows in half cells instead (`n = ceil(need / (GRID / 2)) / 2`, so 1.5, 2.5…).
+ * Either way the bin's outer size is `GRID * n - GAP`. */
+export function footprint(pocket: Ring, fillet: number, halfGrid = false): [number, number] {
   const margin = 2 * Math.max(0, fillet) + 2 * (LIP_INSET + MIN_WALL) + GAP;
   const b = bounds(pocket);
-  return [Math.ceil((b.xmax - b.xmin + margin) / GRID), Math.ceil((b.ymax - b.ymin + margin) / GRID)];
+  const cells = (need: number) => (halfGrid ? Math.ceil(need / (GRID / 2)) / 2 : Math.ceil(need / GRID));
+  return [cells(b.xmax - b.xmin + margin), cells(b.ymax - b.ymin + margin)];
+}
+
+/** Outer size of a bin `n` grid units wide (mm). */
+export function binSize(n: number): number {
+  return GRID * n - GAP;
 }
 
 /** Holes in the bin's base: none, magnets, M3 screws, or a magnet pocket with a screw hole through it. */
@@ -167,6 +175,13 @@ export interface BaseOptions {
   holes?: HoleStyle;
   /** Stacking lip on top (default on); without it the pocket opens at the bin top. */
   lip?: boolean;
+  /** Half-grid feet (default off): they are too small for base holes, so `holes` is ignored. */
+  halfGrid?: boolean;
+}
+
+/** The base holes actually cut: none with half-grid feet. */
+export function baseHoles(o: BaseOptions = {}): HoleStyle {
+  return o.halfGrid ? 'none' : o.holes ?? 'none';
 }
 
 /** Depth below the bin top at which the pocket opens: the lip trough floor, or the top without a lip. */
@@ -176,7 +191,7 @@ export function recess(o: BaseOptions = {}): number {
 
 /** Lowest pocket floor: above the feet, and above the deepest base hole so the pocket can't break into it. */
 export function floorMin(o: BaseOptions = {}): number {
-  const holes = o.holes ?? 'none';
+  const holes = baseHoles(o);
   const hole = holes === 'none' ? 0 : holes === 'magnet' ? MAGNET_H : SCREW_H;
   return Math.max(FLOOR_MIN, hole + HOLE_FLOOR);
 }

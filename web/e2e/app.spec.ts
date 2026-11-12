@@ -75,7 +75,7 @@ function plainPng(w = 64, h = 48): Buffer {
 /** Load the app and wait until the first preset's trace and bin are shown. */
 async function open(page: Page): Promise<void> {
   await page.goto('./');
-  await expect(page.locator('#tool > option')).toHaveCount(4);
+  await expect(page.locator('#tool > option')).toHaveCount(2);
   await expect(page.locator('#cells')).not.toBeEmpty();
   await expect(page.locator('.trace')).toHaveClass(/ready/);
   await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
@@ -208,7 +208,7 @@ test('an uploaded photo is traced, survives a reload and can be removed', async 
   await expect(page.locator('#upMsg')).toHaveText(/Removed “stripper”/);
   await page.reload();
   await open(page);
-  await expect(page.locator('#tool > option')).toHaveCount(4);
+  await expect(page.locator('#tool > option')).toHaveCount(2);
   expect(seen.model).toBe(1);
   expect(errors).toEqual([]);
 });
@@ -221,12 +221,12 @@ test('a photo without the calibration sheet shows the no-sheet error', async ({ 
   await expect(page.locator('#upMsg')).toHaveClass(/error/, { timeout: 60_000 });
   await expect(page.locator('#upMsg')).toContainText(/marker|sheet/i);
   await expect(page.locator('#upBtn')).toBeEnabled();
-  await expect(page.locator('#tool > option')).toHaveCount(4);
+  await expect(page.locator('#tool > option')).toHaveCount(2);
 });
 
 test('the privacy page renders and is linked from the inspector', async ({ page }) => {
   await open(page);
-  await page.locator('.footer.legal a').click();
+  await page.locator('.footer.legal a[href="privacy.html"]').click();
   await expect(page).toHaveURL(/privacy\.html$/);
   await expect(page.locator('h1')).toHaveText('Privacy');
   await expect(page.locator('body')).toContainText('never uploaded');
@@ -278,4 +278,50 @@ test('the mirror axis shows on the trace only while Symmetric tool is on', async
   await page.locator('#sym').uncheck();
   await expect(page.locator('.trace')).not.toHaveClass(/has-axis/);
   await expect(page.locator('.lg-axis')).toBeHidden();
+});
+
+test('half-grid feet give half-cell footprints and turn the holes off', async ({ page }) => {
+  const errors = pageErrors(page);
+  await open(page);
+  await page.locator('#tool').selectOption('studfinder');
+  await expect(page.locator('#cells')).toHaveText('4×5');
+  await page.locator('#holes').selectOption('screw');
+  const deepest = async () => +((await page.locator('#depthNote').textContent())!.match(/([\d.]+) mm/)![1]!);
+  const withScrews = await deepest();
+  await expect(page.locator('#halfGridNote')).toBeHidden();
+  await page.locator('#halfGrid').check();
+  await expect(page.locator('#cells')).toHaveText('3.5×5');
+  await expect(page.locator('#bdim')).toHaveText(/^147×210×/); // 3.5 × 42 − 0.5 = 146.5
+  await expect(page.locator('#holes')).toBeDisabled();
+  await expect(page.locator('#holesCorners')).toBeDisabled();
+  await expect(page.locator('#halfGridNote')).toBeVisible();
+  await expect(page.locator('#holesNote')).toBeHidden();
+  expect(await deepest()).toBeCloseTo(withScrews + 1.25, 2); // no screw holes, so the usual floor
+  await expect(page.locator('#exp')).toHaveText(/Export STL/, { timeout: 60_000 });
+  await expect(page.locator('#exp')).toBeEnabled();
+  await expect(page.locator('#previewMsg')).toHaveText('');
+  await page.locator('#halfGrid').uncheck();
+  await expect(page.locator('#cells')).toHaveText('4×5');
+  await expect(page.locator('#holes')).toBeEnabled();
+  await expect(page.locator('#holesCorners')).toBeEnabled();
+  expect(await deepest()).toBeCloseTo(withScrews, 2);
+  expect(errors).toEqual([]);
+});
+
+test('the pocket and tool sizes show on the trace and under the pocket settings', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('.trace')).toHaveClass(/has-measure/);
+  const dims = page.locator('#pocketDims');
+  await expect(dims).toHaveText(/^Pocket [\d.]+ × [\d.]+ mm · tool [\d.]+ × [\d.]+ mm$/);
+  const nums = async () => (await dims.textContent())!.match(/[\d.]+/g)!.map(Number);
+  const [pw, ph, tw, th] = await nums();
+  expect(pw!).toBeGreaterThan(tw!);
+  expect(ph!).toBeGreaterThan(th!);
+  // the sizes are along the tool's own axes, so rotating the pocket in the bin doesn't change them
+  await setSlider(page, 'rot', 30);
+  await expect(page.locator('#rotV')).toHaveText('30°');
+  await expect(page.locator('#pdim')).not.toHaveText(`${pw}×${ph} mm`);
+  expect(await nums()).toEqual([pw, ph, tw, th]);
+  await setSlider(page, 'clearance', 4);
+  await expect.poll(async () => (await nums())[0]).toBeCloseTo(pw! + 3, 0);
 });
