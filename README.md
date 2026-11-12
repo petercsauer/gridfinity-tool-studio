@@ -1,7 +1,7 @@
 # Gridfinity Tool Studio
 
 Turn a phone photo of a hand tool into a 3D‑printable [gridfinity](https://gridfinity.xyz) bin with a tool‑shaped pocket.
-It runs entirely in your browser: **https://gridfinity-tool-studio.pages.dev**
+It runs entirely in your browser: **https://gridfinitytools.com** (also at https://gridfinity-tool-studio.pages.dev)
 
 ![Gridfinity Tool Studio](docs/screenshot.png)
 

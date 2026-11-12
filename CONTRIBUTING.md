@@ -38,7 +38,27 @@ file changes; if the download fails, the model tests and the upload end‑to‑e
 job: deploys to Cloudflare Pages are manual.
 
 Local `vite dev` and `vite preview` send no cross‑origin isolation (COOP/COEP) headers, so onnxruntime runs
-single‑threaded. That is expected; the production headers are set at deploy time.
+single‑threaded. That is expected; the production headers (COOP, COEP, CSP) live in `web/public/_headers`.
+To try them locally, serve the build with `npx wrangler pages dev dist` from `web/`.
+
+The CSP has no `'unsafe-eval'`. opencv.js and heic2any generate code with `new Function` at runtime, so
+`web/vite.no-eval.ts` patches those helpers into plain closures at build time; it fails the build if a dependency
+upgrade changes the patched code.
+
+## Deploying
+
+The site is the Cloudflare Pages project `gridfinity-tool-studio`, served at https://gridfinitytools.com (and
+https://gridfinity-tool-studio.pages.dev).
+
+```sh
+cd web
+npm run build && find dist -size +25M        # must print nothing
+npx wrangler pages deploy dist --project-name gridfinity-tool-studio --branch main --force
+BASE_URL=https://gridfinitytools.com/ npx playwright test   # runs e2e/live.spec.ts: real model download
+```
+
+Recent wrangler versions deploy `pages` commands to Workers unless `--force` is given; this project is a
+Pages project, so keep the flag.
 
 ## Regenerating fixtures and presets
 

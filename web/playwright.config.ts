@@ -4,10 +4,14 @@
 import { defineConfig } from '@playwright/test';
 
 const PORT = 4175;
+// BASE_URL points the tests at a deployed site (e2e/live.spec.ts); then no local server is started
+const BASE_URL = process.env.BASE_URL;
 const chrome = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 export default defineConfig({
   testDir: 'e2e',
+  // the live spec only runs against a deployed site, and the local specs only against vite preview
+  ...(BASE_URL ? { testMatch: 'live.spec.ts' } : { testIgnore: 'live.spec.ts' }),
   // uploads run IS-Net on WASM (no WebGPU headless): about 20 s each, plus the model load
   timeout: 240_000,
   expect: { timeout: 30_000 },
@@ -15,7 +19,7 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   use: {
-    baseURL: `http://localhost:${PORT}/`,
+    baseURL: BASE_URL ?? `http://localhost:${PORT}/`,
     headless: true,
     viewport: { width: 1440, height: 900 },
     acceptDownloads: true,
@@ -24,7 +28,7 @@ export default defineConfig({
       args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--hide-scrollbars'],
     },
   },
-  webServer: {
+  webServer: BASE_URL ? undefined : {
     command: `npx vite build && npx vite preview --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}/`,
     reuseExistingServer: false,

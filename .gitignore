@@ -11,3 +11,4 @@ dist/
 .cache/
 web/test-results/
 web/playwright-report/
+.wrangler/

@@ -1,9 +1,12 @@
 import { defaultClientConditions } from 'vite';
 import { defineConfig } from 'vitest/config';
+import { noEval } from './vite.no-eval.ts';
 
 export default defineConfig({
   base: './',
-  worker: { format: 'es' },
+  // no runtime code generation in opencv.js and heic2any, so the CSP needs no 'unsafe-eval' (see vite.no-eval.ts)
+  plugins: [noEval()],
+  worker: { format: 'es', plugins: () => [noEval()] },
   // onnxruntime-web without its ~30 MB wasm bundled: src/vision/model.ts loads it from jsDelivr instead
   resolve: { conditions: ['onnxruntime-web-use-extern-wasm', ...defaultClientConditions] },
   // three.js alone is ~550 kB minified; it is one cacheable chunk on purpose
