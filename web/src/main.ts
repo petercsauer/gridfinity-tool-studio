@@ -4,8 +4,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { binSize, maxDepth } from './geometry/pocket';
-import { clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
-import { loadUploads, removeUpload, saveUpload, touchUpload } from './storage';
+import { settingsFromParams, type Layout } from './kit';
+import { LayoutView } from './layout-view';
+import { clamp, clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
+import { loadUploads, removeUpload, saveLayout, saveUpload, touchUpload, type StoredUpload } from './storage';
 import { count, uploadErrorEvent } from './count';
 import { writeStl } from './stl';
 import { traceDxf, traceSvg, type TraceLayers } from './trace-export';
@@ -61,7 +63,8 @@ function addToolOption(t: ToolInfo, parent: HTMLElement = toolMenu): void {
 }
 const isUpload = (id: string) => sheetUrls.has(id);
 /** Make an upload selectable: register it with the worker and add it to the menu. */
-function addUploadTool(u: UploadResult): void {
+function addUploadTool(u: UploadResult & Pick<StoredUpload, 'layout'>): void {
+  if (u.layout) layouts.set(u.id, u.layout);
   const sheetImage = URL.createObjectURL(u.sheetViewJpeg);
   sheetUrls.set(u.id, sheetImage);
   const { id, label, sym, parts, sheetBox } = u;
@@ -72,6 +75,7 @@ function addUploadTool(u: UploadResult): void {
 }
 function dropUploadTool(id: string): void {
   void client.request('removeTool', { id });
+  layouts.delete(id);
   URL.revokeObjectURL(sheetUrls.get(id) ?? '');
   sheetUrls.delete(id);
   tools = tools.filter((t) => t.id !== id);
@@ -81,6 +85,72 @@ function dropUploadTool(id: string): void {
 
 // ---- 2D trace
 const trace = new TraceView($<HTMLCanvasElement>('flat'));
+
+// ---- layout: where each tool's parts sit in the bin, once the user has arranged them (else the kit's
+// initial layout, which the worker makes). The inspector's pocket settings still apply to every part.
+const layouts = new Map<string, Layout>();
+/** The layout to send for a tool, with the inspector's pocket settings. */
+function layoutFor(p: Params): Layout | undefined {
+  const l = layouts.get(p.tool);
+  return l && { ...l, placements: l.placements.map((pl) => ({ ...pl, ...settingsFromParams(p) })) };
+}
+/** Uploads remember their layout; saved 500 ms after the last change to it. */
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function queueSave(id: string, layout: Layout): void {
+  clearTimeout(saveTimers.get(id));
+  saveTimers.set(id, setTimeout(() => {
+    saveTimers.delete(id);
+    void saveLayout(id, layout).catch(() => {});
+  }, 500));
+}
+/** A one-part kit's angle shows on the Rotation slider, which can only show 0–90°. */
+function syncRot(): void {
+  const pl = layouts.get(toolMenu.value)?.placements;
+  if (pl?.length !== 1) return;
+  const el = input('rot');
+  el.value = String(clamp(pl[0]!.rot, 0, 90));
+  $('rotV').textContent = `${Math.round(pl[0]!.rot)}°`;
+  syncP(el);
+}
+const layoutView = new LayoutView($<HTMLCanvasElement>('plan'), $('partList'), $('layoutStatus'), {
+  change(layout) {
+    const id = toolMenu.value;
+    layouts.set(id, layout);
+    syncRot();
+    if (isUpload(id)) queueSave(id, layout);
+    changed();
+  },
+  live({ nx, ny, w, h }) {
+    $('cells').textContent = `${nx}×${ny}`;
+    $('pdim').textContent = `${w.toFixed(1)}×${h.toFixed(1)} mm`;
+    $('bdim').textContent = `${binSize(nx).toFixed(0)}×${binSize(ny).toFixed(0)}×${(state().u * 7).toFixed(0)} mm`;
+  },
+});
+
+// ---- the flat pane: Layout or Trace. Kits with several parts open in Layout, single tools in Trace.
+const tabs = { layout: $('tabLayout'), trace: $('tabTrace') };
+function showPane(name: keyof typeof tabs): void {
+  for (const [k, tab] of Object.entries(tabs)) {
+    const on = k === name;
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    $(tab.getAttribute('aria-controls')!).hidden = !on;
+  }
+  if (name === 'layout') layoutView.draw();
+  else trace.draw();
+}
+for (const [k, tab] of Object.entries(tabs) as [keyof typeof tabs, HTMLElement][]) {
+  tab.addEventListener('click', () => showPane(k));
+  tab.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const next = k === 'layout' ? 'trace' : 'layout';
+    showPane(next);
+    tabs[next].focus();
+    e.preventDefault();
+  });
+}
+/** The tool the pane was last chosen for; the user's choice holds until the tool changes. */
+let paneTool = '';
 
 // ---- 3D view (Quick Look product shot)
 // Vertex normals for the (non-indexed) bin mesh. Two stages:
@@ -411,7 +481,7 @@ async function refreshOutline(): Promise<void> {
   const p = state();
   let r;
   try {
-    r = await client.request('outline', { params: p });
+    r = await client.request('outline', { params: p, layout: layoutFor(p) });
   } catch (e) {
     previewMsg.textContent = errorText(e);
     return;
@@ -431,6 +501,12 @@ async function refreshOutline(): Promise<void> {
       'Try a smaller rotation or clearance.';
   }
   trace.show(r);
+  layoutView.show({ id: p.tool, parts: r.parts, layout: layouts.get(p.tool) ?? r.layout, fillet: p.fillet, halfGrid: p.halfGrid });
+  input('rot').disabled = r.parts.length > 1; // a kit's parts are turned in the Layout pane
+  if (paneTool !== p.tool) {
+    paneTool = p.tool;
+    showPane(r.parts.length > 1 ? 'layout' : 'trace');
+  }
   lastTrace = { tool: p.tool, layers: { tool: r.tool, pocket: r.pocket } };
   syncTraceExport();
 }
@@ -451,7 +527,7 @@ async function generate(): Promise<void> {
     if (tooLarge) blockedVersion = version;
     else {
       const params = state();
-      const r = await client.request('build', { params });
+      const r = await client.request('build', { params, layout: layoutFor(params) });
       if (r) {
         showMesh(r);
         shown = { version, tool: params.tool, bin: r };
@@ -522,6 +598,11 @@ const bind = (id: string, fmt: (v: number) => string) => {
 };
 bind('clearance', trim);
 bind('rot', (v) => v + '°');
+// the slider turns a one-part kit the user has laid out (until then it sets the initial layout's angle)
+input('rot').addEventListener('input', () => {
+  const l = layouts.get(toolMenu.value);
+  if (l?.placements.length === 1) layoutView.apply({ ...l, placements: [{ ...l.placements[0]!, rot: +input('rot').value }] });
+});
 bind('slotD', (v) => String(v));
 bind('slotFrac', (v) => String(Math.round(v * 100)));
 bind('u', (v) => v + 'U');
@@ -563,6 +644,7 @@ function applyToolDefaults(): void {
   const id = toolMenu.value;
   const t = tools.find((x) => x.id === id);
   if (t) input('sym').checked = t.sym;
+  syncRot();
   $('rmRow').hidden = !isUpload(id);
   if (isUpload(id)) void touchUpload(id).catch(() => {});
 }
@@ -674,7 +756,10 @@ $('rmBtn').addEventListener('click', async () => {
   selectTool(tools[0]?.id ?? '');
   say(`Removed “${label}”.`);
 });
-window.addEventListener('resize', () => trace.draw());
+window.addEventListener('resize', () => {
+  trace.draw();
+  layoutView.draw();
+});
 
 // ---- presentation listeners
 // 1. slider fill (--p)
@@ -699,6 +784,7 @@ document.querySelectorAll<HTMLElement>('.glass.interactive').forEach((g) =>
 window.addEventListener('themechange', () => {
   applyTheme3D();
   trace.draw();
+  layoutView.draw();
 });
 
 // ---- start

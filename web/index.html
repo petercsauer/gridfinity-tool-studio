@@ -27,15 +27,28 @@
 </header>
 
 <main class="stage">
-  <section class="view trace">
-    <canvas id="flat"></canvas>
-    <div class="caption">Trace</div>
-    <div class="legend glass" aria-label="Legend">
-      <span><i class="sw-tool"></i>Tool</span>
-      <span><i class="sw-pocket"></i>Pocket</span>
-      <span class="lg-axis"><i class="sw-axis"></i>Axis</span>
+  <div class="pane-2d">
+    <div class="pane-switch glass" role="tablist" aria-label="Flat view">
+      <button role="tab" id="tabLayout" aria-controls="layoutPane" aria-selected="false" tabindex="-1">Layout</button>
+      <button role="tab" id="tabTrace" aria-controls="tracePane" aria-selected="true">Trace</button>
     </div>
-  </section>
+    <section class="view layout" id="layoutPane" role="tabpanel" aria-labelledby="tabLayout" hidden>
+      <canvas id="plan" tabindex="0" aria-label="Bin layout" aria-describedby="layoutKeys"></canvas>
+      <div class="layout-bar">
+        <ul class="part-list" id="partList" role="listbox" aria-label="Parts" aria-describedby="layoutKeys"></ul>
+        <div class="layout-status num" id="layoutStatus" role="status" aria-live="polite">Drag a part to move it, or its handle to turn it.</div>
+      </div>
+      <p id="layoutKeys" hidden>Tab picks a part. Arrow keys move it 1 mm, with Shift 10 mm. [ and ] turn it 90°. Delete removes it. Command or Control Z undoes.</p>
+    </section>
+    <section class="view trace" id="tracePane" role="tabpanel" aria-labelledby="tabTrace">
+      <canvas id="flat"></canvas>
+      <div class="legend glass" aria-label="Legend">
+        <span><i class="sw-tool"></i>Tool</span>
+        <span><i class="sw-pocket"></i>Pocket</span>
+        <span class="lg-axis"><i class="sw-axis"></i>Axis</span>
+      </div>
+    </section>
+  </div>
   <div class="divider" aria-hidden="true"></div>
   <section class="view preview">
     <canvas id="three"></canvas>
