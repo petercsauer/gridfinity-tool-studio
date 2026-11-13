@@ -38,6 +38,18 @@ JPEG, PNG and HEIC (iPhone) photos all work. The first upload takes longer while
 uploads reuse the cached copy. Browsers with WebGPU run the model on the GPU; others fall back to WebAssembly,
 which takes some seconds per photo.
 
+## Several parts in one photo
+
+Lay a kit's parts on the sheet together (say a meter and its probes), a finger's width apart, and upload one
+photo: each part is traced on its own and gets its own pocket in one bin. The **Layout** pane shows the bin from
+above. Drag a part to move it, or its round handle to turn it; the part's axis snaps to 0° and 90° (hold Alt
+or Option to turn freely). With the canvas or the part list focused, arrow keys move the selected part (Shift
+for 10 mm), `[` and `]` turn it 90°, Delete hides it (restore it under Hidden parts), and Cmd/Ctrl+Z undoes.
+Select a part (in the Layout pane, its part list or the Trace pane) and Symmetric tool, Clearance, Rotation,
+Depth and the finger slot apply to it alone; with none selected they apply to all of them.
+The bin grows to fit the parts, or turn off **Auto size** to fix its size in cells. Overlapping pockets merge
+and walls thinner than 1.2 mm are flagged, but neither stops the build. The arrangement is saved with the upload.
+
 ## What you can tune
 
 | Setting | What it does |
@@ -64,7 +76,8 @@ The trace shows the pocket's width and length as dimension lines, measured along
 pocket and tool sizes are also listed under the Pocket settings.
 
 **Trace outline › SVG / DXF** saves the traced outline and the pocket (clearance plus finger slot) at 1:1 in
-millimetres, on separate layers, for laser‑cutting foam inserts or drawing your own bin in CAD. DXF is R12,
+millimetres, on separate layers, for laser‑cutting foam inserts or drawing your own bin in CAD. A kit with
+several parts is saved as arranged, one outline per part, with the bin's outer edge on a layer of its own. DXF is R12,
 which AutoCAD, Fusion, Onshape and LightBurn all open; DWG isn't offered because it's a closed format.
 
 ## How it works
@@ -85,8 +98,8 @@ The app in `web/` is a static site (Vite + TypeScript). The UI is `web/index.htm
    (`web/src/geometry/bin.ts`). Three.js draws the preview.
 
 The Python package in `src/gts/` is the reference implementation the browser port was checked against; the
-JSON fixtures in `tests/fixtures/` pin the two to the same results. Base holes, the lip toggle and half-grid feet exist only in
-the browser app.
+JSON fixtures in `tests/fixtures/` pin the two to the same results. Base holes, the lip toggle, half-grid feet,
+kits (several parts in one photo) and the Layout pane exist only in the browser app.
 
 ## Developing the web app
 

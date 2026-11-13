@@ -1,5 +1,5 @@
-// End-to-end: presets, the 2D trace, the layout editor, the 3D build and STL export, and the upload flow
-// (model consent, tracing, persistence across reloads, removal, errors). The 88 MB model and the onnxruntime wasm are served
+// End-to-end: presets, the 2D trace, the layout editor, the 3D build and STL export, the upload flow
+// (model consent, tracing, persistence across reloads, removal, errors) and a two-part kit from photo to export. The 88 MB model and the onnxruntime wasm are served
 // from local copies (web/.cache and node_modules) instead of Hugging Face and jsDelivr.
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -12,6 +12,7 @@ const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 const MODEL = here('../.cache/model_fp16.onnx');
 const ORT_DIST = here('../node_modules/onnxruntime-web/dist/');
 const STRIPPER = here('../../assets/presets/stripper.jpg');
+const KIT2 = here('../../assets/presets/kit2.jpg');
 
 const cors = { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' };
 
@@ -678,5 +679,129 @@ test('kit warnings: parts dragged together will merge, and a hidden part comes b
   await expect(page.locator('#partList [role=option]')).toHaveText(['Part 1', 'Part 2']);
   await expect(page.locator('#hiddenParts')).toBeHidden();
   await expect.poll(async () => (await lastBuild(page))?.placements.map((pl) => !!pl.hidden)).toEqual([false, false]);
+  expect(errors).toEqual([]);
+});
+
+/** A downloaded binary STL's triangle count, after checking its size and that every sampled vertex is finite
+ * and inside an 8×8 bin. */
+function checkStl(stl: Buffer): number {
+  const triangles = stl.readUInt32LE(80);
+  expect(stl.length).toBe(84 + 50 * triangles);
+  for (let t = 0; t < triangles; t += 97) {
+    for (let k = 0; k < 12; k++) {
+      const v = stl.readFloatLE(84 + t * 50 + k * 4);
+      expect(Number.isFinite(v)).toBe(true);
+      expect(Math.abs(v)).toBeLessThan(8 * 42);
+    }
+  }
+  return triangles;
+}
+
+test('kit flow: a two-part photo is arranged, exported as STL and SVG, and kept', async ({ page, context }) => {
+  test.skip(!existsSync(MODEL), 'Model not cached: run the unit tests once (npm test) to download web/.cache/model_fp16.onnx');
+  const errors = pageErrors(page);
+  await offline(context);
+  await recordOutlines(page);
+  await open(page);
+
+  // the composite photo (scripts/make_kit_photo.py): the flush cutter and the needle-nose pliers
+  await page.locator('#upFile').setInputFiles(KIT2);
+  await page.locator('#consentYes').click();
+  await expect(page.locator('#upMsg')).toHaveText(/Added “kit2” with 2 parts/, { timeout: 200_000 });
+  const id = await page.locator('#tool').inputValue();
+  await expect(page.locator('#layoutPane')).toBeVisible();
+  await expect(page.locator('#partList [role=option]')).toHaveText(['Part 1', 'Part 2']);
+  await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+
+  // part 2 dragged 30 mm left (part 1 stays), then turned 90° with ]
+  const s = Number(await page.locator('#plan').getAttribute('data-scale'));
+  const [a1, a2] = await partsOnScreen(page);
+  // a point on part 2's pocket: its pivot (the pocket's centroid) can fall between a pliers' handles
+  let at = a2!;
+  for (let r = 0, found = false; !found; r += 4) {
+    expect(r).toBeLessThan(200);
+    for (let k = 0; k < 360 && !found; k += r ? 30 : 360) {
+      at = { x: a2!.x + r * Math.cos((k * Math.PI) / 180), y: a2!.y + r * Math.sin((k * Math.PI) / 180) };
+      await page.mouse.click(at.x, at.y);
+      found = (await page.locator('#scopeText').textContent()) === 'Part 2';
+    }
+  }
+  await drag(page, at, { x: at.x - 30 * s, y: at.y });
+  await expect.poll(async () => (await lastLayout(page))?.placements.length).toBe(2);
+  const [b1, b2] = await partsOnScreen(page);
+  const s2 = Number(await page.locator('#plan').getAttribute('data-scale')); // the view refits after a drag
+  expect((b2!.x - b1!.x) / s2 - (a2!.x - a1!.x) / s).toBeCloseTo(-30, 0);
+  expect((b2!.y - b1!.y) / s2 - (a2!.y - a1!.y) / s).toBeCloseTo(0, 0);
+  const dragged = (await lastLayout(page))!.placements;
+  await expect(page.locator('#plan')).toBeFocused();
+  await page.keyboard.press(']');
+  const turned = dragged[1]!.rot + 90 > 180 ? dragged[1]!.rot - 270 : dragged[1]!.rot + 90; // in (-180, 180], as kit.ts keeps angles
+  await expect.poll(async () => (await lastLayout(page))?.placements[1]!.rot).toBeCloseTo(turned, 6);
+  const arranged = (await lastLayout(page))!.placements;
+  expect(arranged[0]).toEqual(dragged[0]);
+  await expect(page.locator('#exp')).toHaveText(/Export STL/, { timeout: 60_000 });
+  await expect(page.locator('#exp')).toBeEnabled();
+  await expect(page.locator('#previewMsg')).toBeEmpty();
+  await page.screenshot({ path: test.info().outputPath('kit-layout.png') });
+
+  // the bin as a valid binary STL
+  const [stlDl] = await Promise.all([page.waitForEvent('download'), page.locator('#exp').click()]);
+  expect(stlDl.suggestedFilename()).toBe(`gridfinity_${id}.stl`);
+  expect(checkStl(readFileSync((await stlDl.path())!))).toBeGreaterThan(1000);
+
+  // the arrangement as SVG and DXF: a path per part in the tool and pocket layers, and the bin's outline
+  const [svgDl] = await Promise.all([page.waitForEvent('download'), page.locator('#expSvg').click()]);
+  expect(svgDl.suggestedFilename()).toBe(`trace_${id}.svg`);
+  const svg = readFileSync((await svgDl.path())!, 'utf8');
+  expect(svg.match(/<path id="tool-p\d+"/g)).toEqual(['<path id="tool-p1"', '<path id="tool-p2"']);
+  expect(svg.match(/<path id="pocket-p\d+"/g)).toEqual(['<path id="pocket-p1"', '<path id="pocket-p2"']);
+  expect(svg).toMatch(/<g id="bin" inkscape:groupmode="layer"[^>]*>\s*<path d="M[^"]+"\/>/);
+  const [dxfDl] = await Promise.all([page.waitForEvent('download'), page.locator('#expDxf').click()]);
+  const dxf = readFileSync((await dxfDl.path())!, 'utf8');
+  expect([...dxf.matchAll(/\r\nPOLYLINE\r\n {2}8\r\n(\w+)\r\n/g)].map((m) => m[1])).toEqual(['TOOL', 'TOOL', 'POCKET', 'POCKET', 'BIN']);
+
+  // the Trace pane: both parts as photographed, part 2 highlighted with its dimensions; clicking part 1
+  // selects it there, in the part list and in the inspector
+  await page.locator('#tabTrace').click();
+  await expect(page.locator('#flat')).toHaveAttribute('data-selected', 'p2');
+  await expect(page.locator('.trace')).toHaveClass(/has-measure/);
+  await page.screenshot({ path: test.info().outputPath('kit-trace.png') });
+  const box = (await page.locator('#flat').boundingBox())!;
+  let hit = '';
+  for (let y = 0.2; y < 0.8 && hit !== 'p1'; y += 0.02) {
+    for (let x = 0.3; x < 0.8 && hit !== 'p1'; x += 0.04) {
+      await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
+      hit = (await page.locator('#flat').getAttribute('data-selected')) ?? '';
+    }
+  }
+  expect(hit).toBe('p1');
+  await expect(page.locator('#partList [aria-selected=true]')).toHaveText('Part 1');
+  await expect(page.locator('#scopeText')).toHaveText('Part 1');
+  await expect(page.locator('.trace')).toHaveClass(/has-measure/);
+
+  // reloaded: the arrangement is back
+  const stored = () => page.evaluate((key) => new Promise<number | null>((resolve) => {
+    const rq = indexedDB.open('gridfinity-tool-studio');
+    rq.onsuccess = () => {
+      const one = rq.result.transaction('uploads').objectStore('uploads').get(key);
+      one.onsuccess = () => {
+        resolve(one.result?.layout?.placements[1]?.rot ?? null);
+        rq.result.close();
+      };
+    };
+  }), id);
+  await expect.poll(stored).toBeCloseTo(turned, 6);
+  await page.reload();
+  await open(page);
+  await page.locator('#tool').selectOption(id);
+  await expect.poll(async () => (await lastLayout(page))?.placements[1]?.rot).toBeCloseTo(turned, 6);
+  const back = (await lastLayout(page))!.placements;
+  for (const i of [0, 1]) {
+    expect(back[i]!.x).toBeCloseTo(arranged[i]!.x, 6);
+    expect(back[i]!.y).toBeCloseTo(arranged[i]!.y, 6);
+    expect(back[i]!.rot).toBeCloseTo(arranged[i]!.rot, 6);
+  }
+  await expect(page.locator('#layoutPane')).toBeVisible();
+  await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
   expect(errors).toEqual([]);
 });

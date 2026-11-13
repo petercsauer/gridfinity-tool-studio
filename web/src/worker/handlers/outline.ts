@@ -93,19 +93,12 @@ export async function outline(raw: Params, { manifold, presets }: Deps, layout?:
   const preset = await presets.get(p.tool);
   const kit = placeKit(manifold, preset, p, layout);
   const parts = kit.all.map((q) => partTrace(manifold, p.fillet, q));
-  const first = kit.visible[0]!;
-  const firstTrace = parts[kit.all.indexOf(first)]!;
   const { nx, ny, locked, pockets } = binLayout(kit, p);
   const b = bounds(pockets.flat());
   const depth = Math.max(...kit.visible.map((q) => q.placement.depth));
   return {
     parts,
     layout: kit.layout,
-    tool: first.placedTool,
-    pocket: first.placedPocket,
-    sheetTool: firstTrace.sheetTool,
-    sheetPocket: firstTrace.sheetPocket,
-    ...(firstTrace.sheetAxis ? { sheetAxis: firstTrace.sheetAxis } : {}),
     sheetBox: preset.sheet_box_mm,
     sheetImage: presets.url(preset.sheet_image),
     nx,
@@ -114,8 +107,6 @@ export async function outline(raw: Params, { manifold, presets }: Deps, layout?:
     h: round(b.ymax - b.ymin, 1),
     maxDepth: maxDepth(p.u, p),
     effectiveDepth: effectiveDepth(p.u, depth, p),
-    symmetryScore: firstTrace.symmetryScore,
-    measure: firstTrace.measure,
     warnings: checkLayout(
       manifold, pockets.map((ring, i) => ({ id: kit.visible[i]!.part.id, ring })), p, locked ? [nx, ny] : undefined),
   };

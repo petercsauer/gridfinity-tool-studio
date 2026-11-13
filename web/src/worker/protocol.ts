@@ -41,14 +41,6 @@ export interface OutlineResult {
   parts: PartTrace[];
   /** The layout the result was made for: the one requested, clamped, or the kit's initial layout. */
   layout: Layout;
-  /** The first visible part's tool and pocket, placed in the bin (mm). */
-  tool: Ring;
-  pocket: Ring;
-  /** The first visible part's tool and pocket in sheet mm, for drawing on the sheet image. */
-  sheetTool: Ring;
-  sheetPocket: Ring;
-  /** With "Symmetric tool" on: the mirror axis as a segment spanning the tool, in sheet mm. */
-  sheetAxis?: [Vec2, Vec2];
   /** Sheet-mm extent [x0, y0, x1, y1] of the sheet image. */
   sheetBox: [number, number, number, number];
   /** URL of the sheet image, relative to the app's base URL. */
@@ -61,10 +53,6 @@ export interface OutlineResult {
   /** Deepest pocket for the requested height, and the depth that will be cut. */
   maxDepth: number;
   effectiveDepth: number;
-  /** How symmetric the tool is (mirror IoU, 1 = perfectly). */
-  symmetryScore: number;
-  /** Pocket and tool sizes along the tool's own upright axes, for the dimension labels on the trace. */
-  measure?: Measurements;
   /** Overlapping pockets, too-thin walls between pockets and pockets outside a locked bin (see checkLayout). */
   warnings?: LayoutWarning[];
 }

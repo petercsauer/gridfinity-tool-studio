@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { binSize, bounds, maxDepth, type Vec2 } from './geometry/pocket';
 import { normalizeDeg, placeRing, type Layout, type Placement } from './kit';
-import { LayoutView, lockedCells, turnAbout } from './layout-view';
+import { hitTest, LayoutView, lockedCells, turnAbout } from './layout-view';
 import { clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
 import { loadUploads, removeUpload, saveLayout, saveUpload, touchUpload, type StoredUpload } from './storage';
 import { count, uploadErrorEvent } from './count';
@@ -86,8 +86,15 @@ function dropUploadTool(id: string): void {
   if (!uploadGroup.children.length) uploadGroup.remove();
 }
 
-// ---- 2D trace
-const trace = new TraceView($<HTMLCanvasElement>('flat'));
+// ---- 2D trace: clicking a part of a kit selects it, as in the Layout pane
+const trace = new TraceView($<HTMLCanvasElement>('flat'), (pt) => {
+  const r = outlineNow();
+  const l = currentLayout();
+  if (!r || !l || r.parts.length < 2) return;
+  const vis = l.placements.filter((pl) => !pl.hidden);
+  const i = hitTest(pt, vis.map((pl) => r.parts.find((q) => q.id === pl.part)?.sheetPocket ?? []));
+  layoutView.select(i === null ? null : vis[i]!.part);
+});
 
 // ---- layout: where each tool's parts sit in the bin and their pocket settings, once the user has arranged
 // or set them (else the kit's initial layout, which the worker makes from the inspector's values).
@@ -159,7 +166,8 @@ const layoutView = new LayoutView($<HTMLCanvasElement>('plan'), $('partList'), $
     $('pdim').textContent = `${w.toFixed(1)}×${h.toFixed(1)} mm`;
     $('bdim').textContent = `${binSize(nx).toFixed(0)}×${binSize(ny).toFixed(0)}×${(state().u * 7).toFixed(0)} mm`;
   },
-  select() {
+  select(id) {
+    trace.select(id);
     syncInspector();
   },
 });
@@ -482,8 +490,28 @@ let tooLarge = false;
 /** The latest outline refresh; a build waits for it so it sees the current footprint. */
 let pendingOutline: Promise<void> = Promise.resolve();
 
-// ---- trace export: the current outline and pocket as SVG or DXF (1:1 mm)
+// ---- trace export: the current outlines and pockets as SVG or DXF (1:1 mm), as arranged in the bin
 let lastTrace: { tool: string; layers: TraceLayers } | null = null;
+/** The visible parts' tools and pockets where the layout puts them. A kit with several parts is exported in
+ * bin coordinates (the bin centred on the origin, as built) with its parts' ids and the bin's outline; a single
+ * tool as it always was. */
+function traceLayers(r: OutlineResult): TraceLayers {
+  const vis = r.layout.placements.flatMap((pl) => {
+    const q = r.parts.find((t) => t.id === pl.part);
+    return q && !pl.hidden ? [{ pl, q }] : [];
+  });
+  const tools = vis.map(({ pl, q }) => placeRing(q.tool, pl));
+  const pockets = vis.map(({ pl, q }) => placeRing(q.pocket, pl));
+  if (r.layout.placements.length < 2) return { tools, pockets };
+  // an auto-sized bin is centred on its pockets; a locked one on the placements' origin
+  const b = bounds(pockets.flat());
+  const [cx, cy] = r.layout.cells ? [0, 0] : [(b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2];
+  const move = (P: Vec2[]) => P.map(([x, y]): Vec2 => [x - cx, y - cy]);
+  return {
+    tools: tools.map(move), pockets: pockets.map(move), ids: vis.map(({ pl }) => pl.part),
+    bin: { w: binSize(r.nx), h: binSize(r.ny) },
+  };
+}
 function syncTraceExport(): void {
   for (const id of ['expSvg', 'expDxf']) $<HTMLButtonElement>(id).disabled = !lastTrace;
 }
@@ -534,17 +562,18 @@ async function refreshOutline(): Promise<void> {
     previewMsg.textContent = `This tool needs a ${r.nx}×${r.ny} bin; the largest is ${MAX_CELLS}×${MAX_CELLS}. ` +
       'Try a smaller rotation or clearance.';
   }
-  trace.show(r);
   layoutView.show({
     id: p.tool, parts: r.parts, layout: layouts.get(p.tool) ?? r.layout, fillet: p.fillet, halfGrid: p.halfGrid,
     warnings: r.warnings ?? [],
   });
+  trace.select(layoutView.selection);
+  trace.show(r);
   syncInspector();
   if (paneTool !== p.tool) {
     paneTool = p.tool;
     showPane(r.parts.length > 1 ? 'layout' : 'trace');
   }
-  lastTrace = { tool: p.tool, layers: { tool: r.tool, pocket: r.pocket } };
+  lastTrace = { tool: p.tool, layers: traceLayers(r) };
   syncTraceExport();
 }
 

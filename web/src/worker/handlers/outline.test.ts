@@ -49,10 +49,10 @@ describe.each(TOOLS)('outline handler: %s', (tool) => {
   it('returns the fixture footprint and pocket, and maps them onto the sheet', async () => {
     const r = await outline(params, deps);
     expect([r.nx, r.ny]).toEqual(fx.footprint);
-    expect(hausdorff(r.pocket, fx.pocket_mm)).toBeLessThanOrEqual(0.5);
+    expect(hausdorff(r.parts[0]!.pocket, fx.pocket_mm)).toBeLessThanOrEqual(0.5);
     const [[a, b, c], [d, e, f]] = fx.up2sheet;
     const mapped = fx.pocket_mm.map(([x, y]) => [a * x + b * y + c, d * x + e * y + f] as [number, number]);
-    expect(hausdorff(r.sheetPocket, mapped)).toBeLessThanOrEqual(0.5);
+    expect(hausdorff(r.parts[0]!.sheetPocket, mapped)).toBeLessThanOrEqual(0.5);
     expect(r.sheetImage).toBe(`presets/${tool}-sheet.jpg`);
     expect(r.effectiveDepth).toBe(fx.bin.effective_depth);
   });
@@ -62,14 +62,14 @@ describe('outline handler parameters', () => {
   it('keeps the sheet trace unrotated when the pocket is rotated', async () => {
     const a = await outline({ ...NEEDLENOSE, rot: 0 }, deps);
     const b = await outline({ ...NEEDLENOSE, rot: 45 }, deps);
-    expect(b.sheetPocket).toEqual(a.sheetPocket);
+    expect(b.parts[0]!.sheetPocket).toEqual(a.parts[0]!.sheetPocket);
     expect(b.nx).toBeGreaterThan(a.nx);
   });
 
   it('clamps out-of-range and non-numeric values', async () => {
     const r = await outline({ ...NEEDLENOSE, clearance: 99, slotFrac: Number.NaN, u: 30, depth: 500 }, deps);
     const ref = await outline({ ...NEEDLENOSE, clearance: 5, u: 8, depth: 46.05 }, deps);
-    expect(r.pocket).toEqual(ref.pocket);
+    expect(r.parts[0]!.pocket).toEqual(ref.parts[0]!.pocket);
     expect(r.effectiveDepth).toBeCloseTo(46.05, 10);
     expect(r.maxDepth).toBeCloseTo(46.05, 10);
   });
@@ -78,7 +78,7 @@ describe('outline handler parameters', () => {
     const fx = presetFixture(tool);
     const params = { ...DEFAULTS, ...fx.params, tool, rot: 30 };
     const r = await outline(params, deps);
-    const m = r.measure!;
+    const m = r.parts[0]!.measure;
     // the unrotated rings, in the upright frame
     const P0 = params.sym ? fx.symmetric_outline_mm : fx.outline_mm;
     const { tool: t, pocket: k } = makePocket(deps.manifold, P0, params);
@@ -105,7 +105,7 @@ describe('outline handler parameters', () => {
       const x = q[0] - c, y = q[1] - f;
       return [a * x + d * y, b * x + e * y] as [number, number];
     };
-    for (const q of r.sheetPocket) {
+    for (const q of r.parts[0]!.sheetPocket) {
       const [x, y] = back(q);
       expect(x).toBeGreaterThanOrEqual(m.pocket.xmin - 0.02);
       expect(x).toBeLessThanOrEqual(m.pocket.xmax + 0.02);
@@ -119,7 +119,7 @@ describe('outline handler parameters', () => {
     const half = await outline({ ...NEEDLENOSE, halfGrid: true }, deps);
     expect(Number.isInteger(half.nx * 2) && Number.isInteger(half.ny * 2)).toBe(true);
     expect(half.nx).toBeLessThanOrEqual(whole.nx);
-    expect(half.pocket).toEqual(whole.pocket);
+    expect(half.parts[0]!.pocket).toEqual(whole.parts[0]!.pocket);
     expect(half.maxDepth).toBeCloseTo(whole.maxDepth, 9);
     const screws = await outline({ ...NEEDLENOSE, holes: 'screw', halfGrid: true }, deps);
     expect(screws.maxDepth).toBeCloseTo(whole.maxDepth, 9);
@@ -139,9 +139,9 @@ describe('outline handler parameters', () => {
     const up = { ...DEFAULTS, tool: 'up-test' };
     const r = await outline(up, { ...deps, presets: tools });
     const ref = await outline({ ...up, tool: 'stripper' }, deps);
-    expect(r.pocket).toEqual(ref.pocket);
+    expect(r.parts[0]!.pocket).toEqual(ref.parts[0]!.pocket);
     expect(r.sheetImage).toBe('blob:http://localhost/abc');
-    expect(r.symmetryScore).toBe(p.symmetry_score);
+    expect(r.parts[0]!.symmetryScore).toBe(p.symmetry_score);
     expect((await tools.list()).map((t) => t.id)).not.toContain('up-test');
     tools.remove('up-test');
     await expect(outline(up, { ...deps, presets: tools })).rejects.toMatchObject({ code: 'unknown-tool' });
@@ -175,8 +175,8 @@ describe('kits with several parts', () => {
     const r = await outline(params, kd, layout(60));
     expect(r.parts.map((q) => q.id)).toEqual(['p1', 'p2']);
     const alone = await outline({ ...params, tool: 'stripper' }, deps);
-    expect(r.parts[1]!.sheetPocket).toEqual(alone.sheetPocket);
-    expect(r.parts[1]!.pocket).toEqual(alone.pocket);
+    expect(r.parts[1]!.sheetPocket).toEqual(alone.parts[0]!.sheetPocket);
+    expect(r.parts[1]!.pocket).toEqual(alone.parts[0]!.pocket);
     expect(r.layout.placements.map((q) => q.x)).toEqual([-60, 60]);
   });
 
