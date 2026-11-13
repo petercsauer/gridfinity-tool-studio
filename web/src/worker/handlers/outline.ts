@@ -1,9 +1,12 @@
-// The 2D trace: tool and pocket in the rotated outline frame (for sizing) and on the sheet.
-import { bounds, effectiveDepth, footprint, makePocket, maxDepth, rotate, type Ring, type Vec2 } from '../../geometry/pocket';
+// The 2D trace: every part's tool and pocket in its own frame (the layout places them), on the sheet where it
+// was photographed, and the footprint of the placed pockets.
+import { bounds, effectiveDepth, footprint, maxDepth, rotate, type Ring, type Vec2 } from '../../geometry/pocket';
+import { axisAngle, type Layout } from '../../kit';
 import { clampParams, type Params } from '../../params';
 import type { Deps } from '../deps';
-import type { Measurements, OutlineResult } from '../protocol';
+import type { Measurements, OutlineResult, PartTrace } from '../protocol';
 import type { Affine } from '../../vision/outline';
+import { placeKit, type PlacedPart } from './placed';
 
 const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;
 
@@ -36,33 +39,52 @@ export function measure(tool: Ring, pocket: Ring, up2sheet: Affine): Measurement
   };
 }
 
-export async function outline(raw: Params, { manifold, presets }: Deps): Promise<OutlineResult> {
-  const p = clampParams(raw);
-  const preset = await presets.get(p.tool);
-  const P0 = p.sym ? preset.symmetric_outline_mm : preset.outline_mm;
-  const { tool, pocket } = makePocket(manifold, rotate(P0, p.rot), p);
-  // the sheet shows the tool where it lies on the paper, so its pocket is made unrotated
-  const onSheet = p.rot === 0 ? { tool, pocket } : makePocket(manifold, P0, p);
-  const [nx, ny] = footprint(pocket, p.fillet, p.halfGrid);
-  const xs = pocket.map((q) => q[0]);
-  const ys = pocket.map((q) => q[1]);
+function partTrace({ part, placement, tool, pocket }: PlacedPart): PartTrace {
+  const { symmetry: sy, up2sheet } = part;
+  const P0 = placement.sym ? sy.outline : part.outline;
   return {
+    id: part.id,
     tool,
     pocket,
-    sheetTool: affine(onSheet.tool, preset.up2sheet),
-    sheetPocket: affine(onSheet.pocket, preset.up2sheet),
-    ...(p.sym && preset.symmetry_axis
-      ? { sheetAxis: affine(axisSegment(P0, preset.symmetry_axis), preset.up2sheet) as [Vec2, Vec2] }
+    sheetTool: affine(tool, up2sheet),
+    sheetPocket: affine(pocket, up2sheet),
+    ...(placement.sym
+      ? { sheetAxis: affine(axisSegment(P0, { deg: sy.axisDeg, offset: sy.offset, centre: sy.centre }), up2sheet) as [Vec2, Vec2] }
       : {}),
+    symmetryScore: sy.score,
+    axisDeg: axisAngle(part),
+    measure: measure(tool, pocket, up2sheet),
+  };
+}
+
+export async function outline(raw: Params, { manifold, presets }: Deps, layout?: Layout): Promise<OutlineResult> {
+  const p = clampParams(raw);
+  const preset = await presets.get(p.tool);
+  const kit = placeKit(manifold, preset, p, layout);
+  const parts = kit.all.map(partTrace);
+  const first = kit.visible[0]!;
+  const firstTrace = parts[kit.all.indexOf(first)]!;
+  const pockets = kit.visible.map((q) => q.placedPocket);
+  const [nx, ny] = footprint(pockets, p.fillet, p.halfGrid);
+  const b = bounds(pockets.flat());
+  const depth = Math.max(...kit.visible.map((q) => q.placement.depth));
+  return {
+    parts,
+    layout: kit.layout,
+    tool: first.placedTool,
+    pocket: first.placedPocket,
+    sheetTool: firstTrace.sheetTool,
+    sheetPocket: firstTrace.sheetPocket,
+    ...(firstTrace.sheetAxis ? { sheetAxis: firstTrace.sheetAxis } : {}),
     sheetBox: preset.sheet_box_mm,
     sheetImage: presets.url(preset.sheet_image),
     nx,
     ny,
-    w: round(Math.max(...xs) - Math.min(...xs), 1),
-    h: round(Math.max(...ys) - Math.min(...ys), 1),
+    w: round(b.xmax - b.xmin, 1),
+    h: round(b.ymax - b.ymin, 1),
     maxDepth: maxDepth(p.u, p),
-    effectiveDepth: effectiveDepth(p.u, p.depth, p),
-    symmetryScore: preset.symmetry_score,
-    measure: measure(onSheet.tool, onSheet.pocket, preset.up2sheet),
+    effectiveDepth: effectiveDepth(p.u, depth, p),
+    symmetryScore: firstTrace.symmetryScore,
+    measure: firstTrace.measure,
   };
 }

@@ -57,6 +57,45 @@ describe.each(TOOLS)('bin parity: %s', (tool) => {
   });
 });
 
+describe('several pockets', () => {
+  const rect = (x0: number, y0: number, w: number, h: number): Ring => [[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h]];
+  const p: BinParams = { u: 4, depth: 12, fillet: 2, bfillet: 0.5 };
+  const volume = (pockets: Ring[]) => genbin(m, pockets, 3, 2, p).volume;
+
+  it('cuts one ring and a list of that one ring identically', () => {
+    const fx = presetFixture('needlenose');
+    const ring = centred(fx.pocket_mm);
+    const a = genbin(m, ring, fx.footprint[0], fx.footprint[1], { ...p, fillet: 3.175 });
+    const b = genbin(m, [ring], fx.footprint[0], fx.footprint[1], { ...p, fillet: 3.175 });
+    expect(b.volume).toBe(a.volume);
+    expect(b.indices.length).toBe(a.indices.length);
+    expect(b.positions).toEqual(a.positions);
+  });
+
+  it('cuts disjoint pockets independently: removals add up', () => {
+    const A = rect(-50, -20, 30, 40);
+    const B = rect(10, -15, 40, 20);
+    const none = volume([]);
+    const removed = (pockets: Ring[]) => none - volume(pockets);
+    expect(removed([A, B])).toBeCloseTo(removed([A]) + removed([B]), 0);
+    const { bin } = genbinManifold(m, [A, B], 3, 2, p);
+    try {
+      expect(bin.status()).toBe('NoError');
+      expect(bin.genus()).toBe(0);
+    } finally {
+      bin.delete();
+    }
+    expect(liveObjects()).toBe(0);
+  });
+
+  it('merges overlapping pockets into one', () => {
+    const A = rect(-40, -15, 50, 30);
+    const B = rect(0, -15, 40, 30);
+    expect(volume([A, B])).toBeCloseTo(volume([rect(-40, -15, 80, 30)]), 0);
+    expect(liveObjects()).toBe(0);
+  });
+});
+
 describe('bin edge cases', () => {
   const fx = presetFixture('needlenose');
   const pocket = centred(fx.pocket_mm);

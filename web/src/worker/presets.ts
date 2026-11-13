@@ -1,5 +1,6 @@
 // Built-in presets: static JSON written by scripts/build_presets.py into public/presets/.
 import type { Ring, Vec2 } from '../geometry/pocket';
+import type { Part } from '../kit';
 import { centroid } from '../vision/symmetry';
 import { PipelineError, type StoredTool, type ToolInfo } from './protocol';
 
@@ -21,6 +22,30 @@ export interface PresetData {
   sheet_box_mm: [number, number, number, number];
   /** File name of the sheet image, next to the JSON (or, for uploads, the image's object URL). */
   sheet_image: string;
+  /** Every part of a kit with several; without it the tool is the one part described above. */
+  parts?: Part[];
+}
+
+/** A preset's single tool as a kit part. */
+export function partFromPreset(p: PresetData, id = 'p1'): Part {
+  return {
+    id,
+    outline: p.outline_mm,
+    crop: p.crop_mm,
+    up2sheet: p.up2sheet,
+    symmetry: {
+      outline: p.symmetric_outline_mm,
+      score: p.symmetry_score,
+      axisDeg: p.symmetry_axis?.deg ?? 0,
+      offset: p.symmetry_axis?.offset ?? 0,
+      centre: p.symmetry_axis?.centre ?? centroid(p.outline_mm),
+    },
+  };
+}
+
+/** The parts of a preset or upload: its own list, or its single tool as one part. */
+export function partsOf(p: PresetData): Part[] {
+  return p.parts?.length ? p.parts : [partFromPreset(p)];
 }
 
 export interface PresetSource {

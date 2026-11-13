@@ -2,12 +2,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { initManifold } from '../../geometry/manifold';
-import { bounds, makePocket } from '../../geometry/pocket';
+import { bounds, footprint, makePocket } from '../../geometry/pocket';
+import { placeRing, settingsFromParams, type Layout } from '../../kit';
 import { hausdorff, presetFixture, TOOLS } from '../../test/fixtures';
 import { DEFAULTS } from '../../params';
 import type { Deps } from '../deps';
-import { withUploads, type PresetData, type PresetSource } from '../presets';
+import { partFromPreset, withUploads, type PresetData, type PresetSource } from '../presets';
 import { PipelineError } from '../protocol';
+import { build } from './build';
 import { outline } from './outline';
 
 const readPublic = <T>(file: string): T =>
@@ -143,5 +145,79 @@ describe('outline handler parameters', () => {
     expect((await tools.list()).map((t) => t.id)).not.toContain('up-test');
     tools.remove('up-test');
     await expect(outline(up, { ...deps, presets: tools })).rejects.toMatchObject({ code: 'unknown-tool' });
+  });
+});
+
+describe('kits with several parts', () => {
+  /** A kit of the needle-nose and the stripper (the stripper's sheet placement), as one preset. */
+  const kitPresets: PresetSource = {
+    ...diskPresets,
+    get: async (id) => {
+      if (id !== 'kit') return diskPresets.get(id);
+      const nn = await diskPresets.get('needlenose');
+      const st = await diskPresets.get('stripper');
+      return { ...nn, id: 'kit', parts: [partFromPreset(nn, 'p1'), partFromPreset(st, 'p2')] };
+    },
+  };
+  const params = { ...DEFAULTS, tool: 'kit', sym: false };
+  const layout = (dx: number): Layout => ({
+    placements: [
+      { part: 'p1', x: -dx, y: 0, rot: 0, ...settingsFromParams(params) },
+      { part: 'p2', x: dx, y: 0, rot: 90, ...settingsFromParams(params) },
+    ],
+  });
+  let kd: Deps;
+  beforeAll(() => {
+    kd = { ...deps, presets: kitPresets };
+  });
+
+  it('traces every part in its own frame and on the sheet where it lay', async () => {
+    const r = await outline(params, kd, layout(60));
+    expect(r.parts.map((q) => q.id)).toEqual(['p1', 'p2']);
+    const alone = await outline({ ...params, tool: 'stripper' }, deps);
+    expect(r.parts[1]!.sheetPocket).toEqual(alone.sheetPocket);
+    expect(r.parts[1]!.pocket).toEqual(alone.pocket);
+    expect(r.layout.placements.map((q) => q.x)).toEqual([-60, 60]);
+  });
+
+  it('sizes the bin for all placed pockets, and grows as they move apart', async () => {
+    const near = await outline(params, kd, layout(40));
+    const far = await outline(params, kd, layout(90));
+    const placed = near.parts.map((q, i) => placeRing(q.pocket, near.layout.placements[i]!));
+    expect([near.nx, near.ny]).toEqual(footprint(placed, params.fillet));
+    expect(far.nx).toBeGreaterThan(near.nx);
+    expect(far.w).toBeCloseTo(near.w + 100, 0);
+  });
+
+  it('builds the bin it sized, with both pockets cut', async () => {
+    // without round-overs, to keep this quick
+    const flat = { ...params, fillet: 0 };
+    const o = await outline(flat, kd, layout(60));
+    const b = await build(flat, kd, layout(60));
+    expect([b.nx, b.ny]).toEqual([o.nx, o.ny]);
+    expect(b.indices.length).toBeGreaterThan(1000);
+    const one = await outline(flat, kd, { placements: [layout(60).placements[0]!, { ...layout(60).placements[1]!, hidden: true }] });
+    expect(one.nx).toBeLessThan(o.nx);
+  });
+
+  it('starts several parts as photographed and refuses a layout with every part hidden', async () => {
+    const r = await outline(params, kd);
+    expect(r.layout.placements).toHaveLength(2);
+    const [a, c] = r.layout.placements;
+    expect(Math.hypot(c!.x - a!.x, c!.y - a!.y)).toBeGreaterThan(0);
+    const hidden = layout(60).placements.map((q) => ({ ...q, hidden: true }));
+    await expect(outline(params, kd, { placements: hidden })).rejects.toMatchObject({ code: 'invalid' });
+  });
+
+  it('cuts the finger slot across a turned part', async () => {
+    const turned = await outline(params, kd, {
+      placements: [{ part: 'p1', x: 0, y: 0, rot: 90, ...settingsFromParams(params) }],
+    });
+    const straight = await outline(params, kd, {
+      placements: [{ part: 'p1', x: 0, y: 0, rot: 0, ...settingsFromParams(params) }],
+    });
+    // the same pocket, turned: width and length swap
+    expect(turned.w).toBeCloseTo(straight.h, 1);
+    expect(turned.h).toBeCloseTo(straight.w, 1);
   });
 });

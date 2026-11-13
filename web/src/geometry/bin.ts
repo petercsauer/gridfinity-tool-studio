@@ -2,7 +2,7 @@
 // Mirrors genbin in src/gts/bin.py (kennetek standard.scad dimensions).
 import type { CrossSection, Manifold, ManifoldToplevel } from 'manifold-3d';
 import { GAP, GRID, HOLE_FROM_SIDE, MAGNET_D, MAGNET_H, SCREW_D, SCREW_H, UHT } from './constants';
-import { baseHoles, ccw, floorMin, recess, signedArea, type HoleStyle, type Ring, type Vec2 } from './pocket';
+import { asRings, baseHoles, ccw, floorMin, recess, signedArea, type HoleStyle, type Ring, type Vec2 } from './pocket';
 
 /** Top radius of the outer wall and the foot pads (bottom, middle, top sizes and radii). The pad sizes are
  * for a 42 mm cell; a foot on a pitch of `p` mm is `GRID - p` smaller (20.5, 16.2 and 14.6 for 21 mm). */
@@ -81,7 +81,7 @@ class Scope {
 
 /** The bin as a manifold, and the depth cut. The caller owns (and must delete) the manifold. */
 export function genbinManifold(
-  m: ManifoldToplevel, pocket: Ring, nx: number, ny: number, p: BinParams,
+  m: ManifoldToplevel, pocket: Ring | readonly Ring[], nx: number, ny: number, p: BinParams,
 ): { bin: Manifold; effectiveDepth: number } {
   const { CrossSection, Manifold } = m;
   const s = new Scope();
@@ -153,39 +153,43 @@ export function genbinManifold(
       }
     }
 
-    // tool pocket, with round-overs that follow the actual outline (stepped offset layers,
-    // no convex hull: a hull would fill the concave jaw/handle gaps)
-    const pk = s.keep(new CrossSection([ccw(pocket)], 'Positive'));
+    // tool pockets, with round-overs that follow the actual outline (stepped offset layers,
+    // no convex hull: a hull would fill the concave jaw/handle gaps); pockets that overlap are one pocket
+    const rings = asRings(pocket).map(ccw);
     const ft = Math.max(0, Math.min(p.fillet, recessZ - floorTop - 0.5)); // top: convex, flares out
     const fb = Math.max(0, Math.min(p.bfillet, recessZ - floorTop - 0.5)); // bottom: concave, insets in
-    const cutters: Manifold[] = [slab(pk, floorTop + fb, top + 1)];
-    /** A layer of the pocket offset by `delta` (largest part, outer contour only) from za to zb. */
-    const ring = (delta: number, za: number, zb: number): void => {
-      const off = s.keep(pk.offset(delta, 'Round', 2, ROUND_SEGMENTS));
-      let best: CrossSection | undefined;
-      for (const part of off.decompose()) {
-        s.keep(part);
-        if (!best || part.area() > best.area()) best = part;
-      }
-      if (!best || best.area() < 1) return;
-      const outer = s.keep(new CrossSection([outerContour(best)], 'Positive'));
-      cutters.push(slab(outer, za, zb));
-    };
     /** Offset of the circular round-over profile at fraction `i/STEPS` of radius `f`. */
     const law = (f: number, i: number) => {
       const d = (i / STEPS) * f;
       return f - Math.sqrt(Math.max(0, f * f - (f - d) ** 2));
     };
-    if (ft > 0.05) {
-      for (let i = 0; i < STEPS; i++) {
-        const off = law(ft, i);
-        if (off < 1e-3) continue;
-        ring(off, recessZ - ((i + 1) / STEPS) * ft - 0.01, recessZ - (i / STEPS) * ft + 0.01);
+    const cutters: Manifold[] = [];
+    for (const pk of rings.length ? s.keep(new CrossSection(rings, 'Positive')).decompose() : []) {
+      s.keep(pk);
+      cutters.push(slab(pk, floorTop + fb, top + 1));
+      /** A layer of the pocket offset by `delta` (largest part, outer contour only) from za to zb. */
+      const ring = (delta: number, za: number, zb: number): void => {
+        const off = s.keep(pk.offset(delta, 'Round', 2, ROUND_SEGMENTS));
+        let best: CrossSection | undefined;
+        for (const part of off.decompose()) {
+          s.keep(part);
+          if (!best || part.area() > best.area()) best = part;
+        }
+        if (!best || best.area() < 1) return;
+        const outer = s.keep(new CrossSection([outerContour(best)], 'Positive'));
+        cutters.push(slab(outer, za, zb));
+      };
+      if (ft > 0.05) {
+        for (let i = 0; i < STEPS; i++) {
+          const off = law(ft, i);
+          if (off < 1e-3) continue;
+          ring(off, recessZ - ((i + 1) / STEPS) * ft - 0.01, recessZ - (i / STEPS) * ft + 0.01);
+        }
       }
-    }
-    if (fb > 0.05) {
-      for (let i = 0; i < STEPS; i++) {
-        ring(-law(fb, i), floorTop + (i / STEPS) * fb - 0.01, floorTop + ((i + 1) / STEPS) * fb + 0.01);
+      if (fb > 0.05) {
+        for (let i = 0; i < STEPS; i++) {
+          ring(-law(fb, i), floorTop + (i / STEPS) * fb - 0.01, floorTop + ((i + 1) / STEPS) * fb + 0.01);
+        }
       }
     }
     const cutter = s.keep(Manifold.union(cutters));
@@ -216,9 +220,9 @@ function outerContour(cs: CrossSection): Vec2[] {
   return ccw(best);
 }
 
-/** Build an `nx` x `ny` cell, `u`-unit bin with `pocket` (mm, centred on the origin) cut below
+/** Build an `nx` x `ny` cell, `u`-unit bin with `pocket` (one ring or several; mm, centred on the origin) cut below
  * the stacking-lip recess, as triangle arrays. The depth is limited to maxDepth(u, p). */
-export function genbin(m: ManifoldToplevel, pocket: Ring, nx: number, ny: number, p: BinParams): BinMesh {
+export function genbin(m: ManifoldToplevel, pocket: Ring | readonly Ring[], nx: number, ny: number, p: BinParams): BinMesh {
   const { bin, effectiveDepth } = genbinManifold(m, pocket, nx, ny, p);
   try {
     const mesh = bin.getMesh();
