@@ -298,8 +298,8 @@ describe('kit build performance', () => {
   };
 
   it('builds 12 placed parts, each with its own depth, in under 5 s and frees everything', async () => {
-    // without round-overs: their stepped layers cost each pocket as much as a single tool's bin (seconds)
-    const params = { ...DEFAULTS, tool: 'twelve', sym: false, u: 5, slotR: 5, slotOver: 2, fillet: 0 };
+    // with the default top round-over, the costliest part of each pocket
+    const params = { ...DEFAULTS, tool: 'twelve', sym: false, u: 5, slotR: 5, slotOver: 2 };
     const own = settingsFromParams(params);
     // six columns of two rows
     const layout: Layout = {
