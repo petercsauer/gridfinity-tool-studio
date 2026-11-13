@@ -132,8 +132,7 @@ describe('outline handler parameters', () => {
     const p = await diskPresets.get('stripper');
     const tools = withUploads(diskPresets);
     tools.add({
-      id: 'up-test', label: 'Mine', sym: false, outline: p.outline_mm, crop: p.crop_mm, up2sheet: p.up2sheet,
-      symmetry: { outline: p.symmetric_outline_mm, score: p.symmetry_score, axisDeg: 0, offset: 0 },
+      id: 'up-test', label: 'Mine', sym: false, parts: [partFromPreset(p)],
       sheetBox: p.sheet_box_mm, sheetImage: 'blob:http://localhost/abc',
     });
     const up = { ...DEFAULTS, tool: 'up-test' };

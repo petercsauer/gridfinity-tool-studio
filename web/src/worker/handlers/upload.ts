@@ -1,7 +1,9 @@
-// Tracing an uploaded calibration-sheet photo. Mirrors process_photo in src/gts/trace.py: find the sheet,
-// pass 1 segments the whole page plus a 40 mm margin to find the tool, pass 2 segments a tight crop around it
-// for precise edges, then the upright outline, its symmetric version and the sheet view.
+// Tracing an uploaded calibration-sheet photo into a kit. Mirrors process_photo in src/gts/trace.py for each
+// part: find the sheet, pass 1 segments the whole page plus a 40 mm margin to find the parts, pass 2 segments
+// one tight crop around all of them for precise edges, then each part's upright outline and symmetric
+// version, and the sheet view.
 import type { Vec2 } from '../../geometry/pocket';
+import type { Part } from '../../kit';
 import { MAX_SIDE } from '../../vision/decode';
 import { getSession, type Progress } from '../../vision/model';
 import { getCv, type CV } from '../../vision/opencv';
@@ -16,8 +18,16 @@ import { isOutOfMemory, memoryError, PipelineError, type UploadResult } from '..
 const PX = 8;
 /** Scale of the sheet view (px per mm). */
 const SHEET_PX = 4;
-/** Fewest foreground pixels that count as a tool: 8 mm x 8 mm. */
+/** Fewest foreground pixels that count as a part: 8 mm x 8 mm. */
 const MIN_TOOL_PX = (8 * PX) ** 2;
+/** Blobs smaller than this share of the largest are specks or shadows, not parts. */
+const MIN_PART_SHARE = 0.02;
+/** Most parts one photo can hold. */
+export const MAX_PARTS = 12;
+/** The paper in sheet mm, Letter or A4 (the markers sit the same on both): a part's centre lies on it. */
+const PAPER: Box = [0, 0, 215.9, 297];
+/** Height (mm) of the rows parts are numbered in: rows top to bottom, then left to right within a row. */
+const ROW_MM = 20;
 /** JPEG quality of the sheet view (Python uses 88). */
 const JPEG_QUALITY = 0.88;
 
@@ -26,7 +36,7 @@ export interface UploadEnv {
   /** Background removal: an RGBA image to a 0-255 mask of the same size. */
   segment(img: RGBAImage): Promise<Mask>;
   encodeJpeg(img: RGBAImage): Promise<Blob>;
-  /** Told when the pipeline moves to finding the sheet and then to tracing the tool. */
+  /** Told when the pipeline moves to finding the sheet and then to tracing the parts. */
   stage?(stage: 'sheet' | 'trace'): void;
 }
 
@@ -57,53 +67,71 @@ export function workerUploadEnv(onProgress?: Progress, stage?: UploadEnv['stage'
 
 const NO_TOOL = 'Calibration sheet found, but no tool was detected on it.';
 const CUT_OFF = 'Part of the tool is outside the photo. Step back so the whole tool and all four markers are in frame.';
+const cutOffPart = (n: number) => `Part ${n} runs off the photo. Step back so every part and all four markers are in frame.`;
+const tooMany = (n: number) =>
+  `There are ${n} parts on the sheet; a kit can have at most ${MAX_PARTS}. Photograph fewer parts at a time.`;
 
-interface Tool {
-  /** Pixels above 128 in the whole mask. */
-  foreground: number;
-  /** Bounding box [x, y, w, h] of the largest contour. */
+interface FoundPart {
+  /** Its external contour (CV_32SC2; the caller deletes it). */
+  contour: CV;
+  /** Bounding box [x, y, w, h] and area centroid of the contour (mask px). */
   box: [number, number, number, number];
-  /** The largest contour filled with 255 (the caller deletes it), when asked for. */
-  filled: CV | null;
+  centre: [number, number];
 }
 
-/** The largest external contour of a mask (thresholded at > 128): its bounding box and, optionally, filled. */
-function largestTool(cv: CV, mask: Mask, fill: boolean): Tool {
+/** The external contours of a mask (thresholded at > 128) whose pixel (0, 0) sits at `originMm` on the sheet
+ * that count as parts: centred on the paper (so clutter on the table around it isn't a part), at least
+ * MIN_TOOL_PX and MIN_PART_SHARE of the largest such, largest first. More than MAX_PARTS is a
+ * `too-many-parts` error. */
+function findParts(cv: CV, mask: Mask, originMm: Vec2): FoundPart[] {
   const src = cv.matFromArray(mask.height, mask.width, cv.CV_8UC1, mask.data);
   const bin = new cv.Mat();
   const contours = new cv.MatVector();
   const hierarchy = new cv.Mat();
   try {
     cv.threshold(src, bin, 128, 1, cv.THRESH_BINARY);
-    const foreground = cv.countNonZero(bin);
     cv.findContours(bin, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
-    let best = -1;
-    let bestArea = -Infinity;
+    const blobs: { i: number; area: number; centre: [number, number] }[] = [];
     for (let i = 0; i < contours.size(); i++) {
       const c = contours.get(i);
-      const a = cv.contourArea(c);
-      if (a > bestArea) {
-        best = i;
-        bestArea = a;
-      }
+      const area = cv.contourArea(c);
+      const mo = cv.moments(c);
       c.delete();
+      if (!(mo.m00 > 0)) continue;
+      const centre: [number, number] = [mo.m10 / mo.m00, mo.m01 / mo.m00];
+      const [sx, sy] = [originMm[0] + centre[0] / PX, originMm[1] + centre[1] / PX];
+      if (sx >= PAPER[0] && sx <= PAPER[2] && sy >= PAPER[1] && sy <= PAPER[3]) blobs.push({ i, area, centre });
     }
-    if (best < 0) return { foreground, box: [0, 0, 0, 0], filled: null };
-    const c = contours.get(best);
-    const r = cv.boundingRect(c);
-    c.delete();
-    let filled: CV = null;
-    if (fill) {
-      filled = cv.Mat.zeros(mask.height, mask.width, cv.CV_8UC1);
-      cv.drawContours(filled, contours, best, new cv.Scalar(255), -1);
-    }
-    return { foreground, box: [r.x, r.y, r.width, r.height], filled };
+    const min = Math.max(MIN_TOOL_PX, MIN_PART_SHARE * Math.max(0, ...blobs.map((b) => b.area)));
+    const keep = blobs.filter((b) => b.area >= min).sort((p, q) => q.area - p.area);
+    if (keep.length > MAX_PARTS) throw new PipelineError('too-many-parts', tooMany(keep.length));
+    return keep.map(({ i, centre }): FoundPart => {
+      const c = contours.get(i);
+      const r = cv.boundingRect(c);
+      return { contour: c, box: [r.x, r.y, r.width, r.height], centre };
+    });
   } finally {
     for (const m of [src, bin, contours, hierarchy]) m.delete();
   }
 }
 
-/** Whether the filled tool, grown by 3 px, reaches pixels from outside the photo or touches the canvas border. */
+/** A `w` x `h` mask with only `contour` filled with 255 (the caller deletes it). */
+function filledPart(cv: CV, contour: CV, w: number, h: number): CV {
+  const one = new cv.MatVector();
+  const filled = cv.Mat.zeros(h, w, cv.CV_8UC1);
+  try {
+    one.push_back(contour);
+    cv.drawContours(filled, one, 0, new cv.Scalar(255), -1);
+    return filled;
+  } catch (e) {
+    filled.delete();
+    throw e;
+  } finally {
+    one.delete();
+  }
+}
+
+/** Whether the filled part, grown by 3 px, reaches pixels from outside the photo or touches the canvas border. */
 function cutOff(cv: CV, tool: CV, valid: Uint8Array): boolean {
   const kernel = cv.Mat.ones(7, 7, cv.CV_8U);
   const grown = new cv.Mat();
@@ -143,7 +171,8 @@ async function findSheet(img: RGBAImage): Promise<Homography> {
 
 const label = (name: string) => name.trim().slice(0, 40) || 'Upload';
 
-/** Trace a calibration-sheet photo (RGBA, long side at most MAX_SIDE) into a new tool. */
+/** Trace a calibration-sheet photo (RGBA, long side at most MAX_SIDE) into a new kit with one part per object
+ * on the sheet. */
 export async function upload(image: RGBAImage, name: string, { manifold }: Deps, env: UploadEnv): Promise<UploadResult> {
   checkImage(image);
   env.stage?.('sheet');
@@ -152,39 +181,63 @@ export async function upload(image: RGBAImage, name: string, { manifold }: Deps,
   const cv = await getCv();
   const [pw, ph] = SHEET.pageMm;
 
-  // pass 1: the whole page plus 40 mm, to find the tool wherever it is
+  // pass 1: the whole page plus 40 mm, to find the parts wherever they are
   const R1: Box = [-40, -40, pw + 40, ph + 40];
-  const first = largestTool(cv, await env.segment((await rectRegion(image, H, R1, PX)).canvas), false);
-  if (first.foreground < MIN_TOOL_PX) throw new PipelineError('no-tool', NO_TOOL);
-  const [x, y, w, h] = first.box;
-  const bx0 = R1[0] + x / PX;
-  const by0 = R1[1] + y / PX;
+  const first = findParts(cv, await env.segment((await rectRegion(image, H, R1, PX)).canvas), [R1[0], R1[1]]);
+  for (const f of first) f.contour.delete();
+  if (!first.length) throw new PipelineError('no-tool', NO_TOOL);
+  const x0 = Math.min(...first.map((f) => f.box[0]));
+  const y0 = Math.min(...first.map((f) => f.box[1]));
+  const x1 = Math.max(...first.map((f) => f.box[0] + f.box[2]));
+  const y1 = Math.max(...first.map((f) => f.box[1] + f.box[3]));
 
-  // pass 2: the tool plus 15 mm, for precise edges
-  const R2: Box = [bx0 - 15, by0 - 15, bx0 + w / PX + 15, by0 + h / PX + 15];
+  // pass 2: all the parts plus 15 mm, for precise edges; the parts found here are the ones traced
+  const R2: Box = [R1[0] + x0 / PX - 15, R1[1] + y0 / PX - 15, R1[0] + x1 / PX + 15, R1[1] + y1 / PX + 15];
   const { canvas, valid } = await rectRegion(image, H, R2, PX);
   const mask = await env.segment(canvas);
-  const second = largestTool(cv, mask, true);
+  const found = findParts(cv, mask, [R2[0], R2[1]]);
+  const parts: Part[] = [];
+  const onSheet: Point[][] = [];
   try {
-    if (second.foreground < MIN_TOOL_PX || !second.filled) throw new PipelineError('no-tool', NO_TOOL);
-    if (cutOff(cv, second.filled, valid)) throw new PipelineError('cut-off', CUT_OFF);
+    if (!found.length) throw new PipelineError('no-tool', NO_TOOL);
+    const row = (f: FoundPart) => Math.floor((R2[1] + f.centre[1] / PX) / ROW_MM);
+    found.sort((p, q) => row(p) - row(q) || p.centre[0] - q.centre[0]);
+    const fill = (f: FoundPart) => filledPart(cv, f.contour, mask.width, mask.height);
+    found.forEach((f, i) => {
+      const filled = fill(f);
+      try {
+        if (cutOff(cv, filled, valid)) throw new PipelineError('cut-off', found.length > 1 ? cutOffPart(i + 1) : CUT_OFF);
+      } finally {
+        filled.delete();
+      }
+    });
+    for (const [i, f] of found.entries()) {
+      // each part is traced from a mask holding only that part
+      const filled = fill(f);
+      const data = new Uint8Array(filled.data as Uint8Array);
+      filled.delete();
+      const up = await outlineFromMask({ width: mask.width, height: mask.height, data }, [R2[0], R2[1]] as Vec2, PX);
+      const sym = symmetrize(manifold, up.outline);
+      parts.push({
+        id: `p${i + 1}`,
+        outline: up.outline,
+        crop: up.crop,
+        up2sheet: up.up2sheet,
+        symmetry: { outline: sym.outline, score: sym.score, axisDeg: sym.axisDeg, offset: sym.offset, centre: sym.centre },
+      });
+      const [[a, b, c], [d, e, g]] = up.up2sheet;
+      onSheet.push(up.outline.map(([qx, qy]): Point => [a * qx + b * qy + c, d * qx + e * qy + g]));
+    }
   } finally {
-    second.filled?.delete();
+    for (const f of found) f.contour.delete();
   }
 
-  const up = await outlineFromMask(mask, [R2[0], R2[1]] as Vec2, PX);
-  const sym = symmetrize(manifold, up.outline);
-  const [[a, b, c], [d, e, f]] = up.up2sheet;
-  const onSheet = up.outline.map(([qx, qy]): Point => [a * qx + b * qy + c, d * qx + e * qy + f]);
   const view = await renderSheetView(image, H, onSheet, SHEET_PX);
   return {
     id: `up-${crypto.randomUUID().slice(0, 8)}`,
     label: label(name),
     sym: false,
-    outline: up.outline,
-    crop: up.crop,
-    up2sheet: up.up2sheet,
-    symmetry: { outline: sym.outline, score: sym.score, axisDeg: sym.axisDeg, offset: sym.offset },
+    parts,
     sheetViewJpeg: await env.encodeJpeg(view.image),
     sheetBox: view.box,
   };

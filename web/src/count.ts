@@ -6,7 +6,7 @@ import { isOutOfMemory, PipelineError } from './worker/protocol';
 
 export type CountEvent =
   | 'upload-start' | 'model-yes' | 'model-no'
-  | 'upload-ok' | 'upload-no-sheet' | 'upload-no-tool' | 'upload-cut-off'
+  | 'upload-ok' | 'upload-no-sheet' | 'upload-no-tool' | 'upload-cut-off' | 'upload-too-many'
   | 'upload-error-decode' | 'upload-error-model' | 'upload-error-memory' | 'upload-error'
   | 'export-stl' | 'export-svg' | 'export-dxf';
 
@@ -17,6 +17,7 @@ export function uploadErrorEvent(e: unknown, decoding: boolean): CountEvent {
   if (code === 'no-sheet') return 'upload-no-sheet';
   if (code === 'no-tool') return 'upload-no-tool';
   if (code === 'cut-off') return 'upload-cut-off';
+  if (code === 'too-many-parts') return 'upload-too-many';
   if (code === 'memory' || isOutOfMemory(e)) return 'upload-error-memory';
   if (decoding) return 'upload-error-decode';
   if (code === 'model') return 'upload-error-model';

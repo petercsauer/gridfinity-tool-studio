@@ -2,7 +2,7 @@
 // Every request carries a per-kind `version`; the client drops responses to requests
 // that a newer request of the same kind has superseded.
 import type { Box2, Ring, Vec2 } from '../geometry/pocket';
-import type { Layout } from '../kit';
+import type { Layout, Part } from '../kit';
 import type { Params } from '../params';
 import type { Affine } from '../vision/outline';
 import type { Box, RGBAImage } from '../vision/sheet';
@@ -88,20 +88,14 @@ export interface BuildResult {
 }
 
 export interface UploadResult extends ToolInfo {
-  /** Upright, centred tool outline (mm), 720 points, last repeats the first. */
-  outline: Ring;
-  /** Size [w, h] of the upright crop the outline is centred in (mm). */
-  crop: [number, number];
-  /** 2x3 affine [A | b] from outline mm to sheet mm: sheet = A q + b. */
-  up2sheet: Affine;
-  /** The symmetric version of the outline and how symmetric the tool is (mirror IoU, 1 = perfectly). */
-  symmetry: { outline: Ring; score: number; axisDeg: number; offset: number };
-  /** JPEG of the perspective-corrected sheet the tool was shot on, and its sheet-mm extent [x0, y0, x1, y1]. */
+  /** Every part traced on the sheet, ordered by where it lay (rows top to bottom, then left to right). */
+  parts: Part[];
+  /** JPEG of the perspective-corrected sheet the kit was shot on, and its sheet-mm extent [x0, y0, x1, y1]. */
   sheetViewJpeg: Blob;
   sheetBox: Box;
 }
 
-/** An uploaded tool as the worker needs it: the upload result with the sheet view as a URL (an object URL the
+/** An uploaded kit as the worker needs it: the upload result with the sheet view as a URL (an object URL the
  * UI thread created for `sheetViewJpeg`) instead of the image itself. */
 export type StoredTool = Omit<UploadResult, 'sheetViewJpeg'> & { sheetImage: string };
 
@@ -145,10 +139,10 @@ export type Request<K extends Kind = Kind> = K extends Kind
   : never;
 
 /** `no-sheet`: the calibration markers weren't all found; `no-tool`: nothing on the sheet; `cut-off`: part of
- * the tool is outside the photo; `model`: the background-removal model couldn't be downloaded or run;
- * `memory`: the browser ran out of memory. */
+ * a tool is outside the photo; `too-many-parts`: more parts on the sheet than a kit can hold; `model`: the
+ * background-removal model couldn't be downloaded or run; `memory`: the browser ran out of memory. */
 export type ErrorCode = 'not-implemented' | 'unknown-tool' | 'too-large' | 'invalid' | 'no-sheet' | 'no-tool' | 'cut-off'
-  | 'model' | 'memory' | 'internal';
+  | 'too-many-parts' | 'model' | 'memory' | 'internal';
 
 /** Whether an error looks like the browser running out of memory: a failed ArrayBuffer or WebAssembly memory
  * allocation, an Emscripten OOM abort, or onnxruntime failing to allocate a tensor. Checks the message too,

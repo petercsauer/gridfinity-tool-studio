@@ -61,20 +61,23 @@ export interface ToolSource extends PresetSource {
   remove(id: string): void;
 }
 
-/** An uploaded tool in the preset format. */
+/** An uploaded kit in the preset format: its first part as the single tool, and every part. */
 export function uploadAsPreset(t: StoredTool): PresetData {
+  const [first] = t.parts;
+  if (!first) throw new PipelineError('invalid', `The upload "${t.label}" has no parts.`);
   return {
     id: t.id,
     label: t.label,
     sym: t.sym,
-    crop_mm: t.crop,
-    outline_mm: t.outline,
-    symmetric_outline_mm: t.symmetry.outline,
-    symmetry_score: t.symmetry.score,
-    symmetry_axis: { deg: t.symmetry.axisDeg, offset: t.symmetry.offset, centre: centroid(t.outline) },
-    up2sheet: t.up2sheet,
+    crop_mm: first.crop,
+    outline_mm: first.outline,
+    symmetric_outline_mm: first.symmetry.outline,
+    symmetry_score: first.symmetry.score,
+    symmetry_axis: { deg: first.symmetry.axisDeg, offset: first.symmetry.offset, centre: first.symmetry.centre },
+    up2sheet: first.up2sheet,
     sheet_box_mm: t.sheetBox,
     sheet_image: t.sheetImage,
+    parts: t.parts,
   };
 }
 

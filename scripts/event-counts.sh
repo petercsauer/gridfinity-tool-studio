@@ -16,7 +16,7 @@ if r.get("errors"):
     sys.exit("Cloudflare: " + r["errors"][0]["message"])
 counts = {g["dimensions"]["clientRequestPath"][3:-4]: g["count"] for g in r["data"]["viewer"]["zones"][0]["httpRequestsAdaptiveGroups"]}
 order = ["upload-start", "model-yes", "model-no", "upload-ok", "upload-no-sheet", "upload-no-tool", "upload-cut-off",
-         "upload-error-decode", "upload-error-model", "upload-error-memory", "upload-error",
+         "upload-too-many", "upload-error-decode", "upload-error-model", "upload-error-memory", "upload-error",
          "export-stl", "export-svg", "export-dxf"]
 for k in order + sorted(set(counts) - set(order)):
     print(f"{k:20} {counts.get(k, 0)}")
