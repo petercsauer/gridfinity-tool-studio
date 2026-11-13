@@ -305,6 +305,21 @@ describe.skipIf(!session)('upload with IS-Net', () => {
     });
   });
 
+  // kit2.jpg: the needle-nose pasted upright left of the flush cutter (scripts/make_kit_photo.py)
+  it('finds both parts of the two-part kit photo, each the size of its preset', async () => {
+    const r = await upload(presetPhoto('kit2'), 'kit2', deps, modelEnv());
+    expect(r.parts.map((q) => q.id)).toEqual(['p1', 'p2']);
+    // the needle-nose is the one centred at x 37 mm, left of the flush cutter
+    const [nose, cutter] = [...r.parts].sort((a, b) => a.up2sheet[0][2] - b.up2sheet[0][2]) as [Part, Part];
+    expect(Math.abs(nose.up2sheet[0][2] - 37)).toBeLessThanOrEqual(3);
+    expect(cutter.up2sheet[0][2]).toBeGreaterThan(90);
+    for (const [q, tool] of [[nose, 'needlenose'], [cutter, 'flushcutter']] as const) {
+      const [got, want] = [await rectDims(q.outline), await rectDims(presetFixture(tool).outline_mm)];
+      expect(Math.abs(got[0] - want[0])).toBeLessThanOrEqual(1.5);
+      expect(Math.abs(got[1] - want[1])).toBeLessThanOrEqual(1.5);
+    }
+  }, 120000);
+
   it('rejects a tool that runs off the edge of the photo', async () => {
     await rejects(upload(await shiftedSheet('stripper', 40), 'x', deps, modelEnv()), 'cut-off', /outside the photo/);
   }, 60000);
