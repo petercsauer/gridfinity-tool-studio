@@ -326,20 +326,24 @@ test('the pocket and tool sizes show on the trace and under the pocket settings'
   await expect.poll(async () => (await nums())[0]).toBeCloseTo(pw! + 3, 0);
 });
 
-/** Record the layout sent with every outline request (null when the kit's initial layout is used). */
+/** Record the layout sent with every outline and build request (null when the kit's initial layout is used). */
 async function recordOutlines(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const w = window as unknown as { outlines: unknown[] };
+    const w = window as unknown as { outlines: unknown[]; builds: unknown[] };
     w.outlines = [];
+    w.builds = [];
     const post = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function (this: Worker, msg: { kind?: string; layout?: unknown }, ...rest: never[]) {
       if (msg?.kind === 'outline') w.outlines.push(msg.layout ?? null);
+      if (msg?.kind === 'build') w.builds.push(msg.layout ?? null);
       return (post as (...a: unknown[]) => void).call(this, msg, ...rest);
     };
   });
 }
-type SentLayout = { placements: { x: number; y: number; rot: number }[] } | null;
+type SentPlacement = { x: number; y: number; rot: number; depth: number; clearance: number; hidden?: boolean };
+type SentLayout = { placements: SentPlacement[]; cells?: [number, number] } | null;
 const lastLayout = (page: Page) => page.evaluate(() => (window as unknown as { outlines: SentLayout[] }).outlines.at(-1) ?? null);
+const lastBuild = (page: Page) => page.evaluate(() => (window as unknown as { builds: SentLayout[] }).builds.at(-1) ?? null);
 const sentPlacement = async (page: Page) => (await lastLayout(page))?.placements[0];
 
 /** Click around the middle of the layout until a part is hit; returns that point (page px). */
@@ -484,4 +488,195 @@ test('layout persists: a moved upload keeps its placement after a reload', async
   expect(back.y).toBeCloseTo(moved.y, 6);
   await expect(page.locator('#rotV')).toHaveText('90°');
   await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+});
+
+// ---- kits with several parts: a two-part kit stored the way storage.ts keeps an upload (schema 2), made from
+// the stud finder and flush cutter presets at 0.3 scale (so they fit a 3×2 bin), photographed 60 mm apart
+const KIT = 'kit-e2e';
+type PresetJson = {
+  outline_mm: number[][]; symmetric_outline_mm: number[][]; crop_mm: number[]; symmetry_score: number;
+  symmetry_axis: { deg: number; offset: number; centre: number[] };
+};
+function kitParts(scale = 0.3) {
+  const presets: PresetJson[] = [here('../public/presets/studfinder.json'), here('../../tests/fixtures/web-presets/flushcutter.json')]
+    .map((f) => JSON.parse(readFileSync(f, 'utf8')));
+  const sc = (P: number[][]) => P.map(([x, y]) => [x! * scale, y! * scale]);
+  return presets.map((p, i) => ({
+    id: `p${i + 1}`,
+    outline: sc(p.outline_mm),
+    crop: p.crop_mm.map((v) => v * scale),
+    up2sheet: [[1, 0, 80 + 60 * i], [0, 1, 140]],
+    symmetry: {
+      outline: sc(p.symmetric_outline_mm), score: p.symmetry_score, axisDeg: p.symmetry_axis.deg,
+      offset: p.symmetry_axis.offset * scale, centre: sc([p.symmetry_axis.centre])[0],
+    },
+  }));
+}
+
+/** Store the two-part kit in IndexedDB, reload, and select it. */
+async function openKit(page: Page): Promise<void> {
+  await open(page); // the app has made its store
+  await page.evaluate(async ({ id, parts }) => {
+    const sheetViewJpeg = await (await fetch('presets/studfinder-sheet.jpg')).blob();
+    const now = Date.now();
+    const record = {
+      id, label: 'Two-part kit', sym: false, parts, sheetViewJpeg, sheetBox: [10.68, 14.68, 205.22, 264.72],
+      schema: 2, created: now, used: now,
+    };
+    await new Promise<void>((resolve, reject) => {
+      const rq = indexedDB.open('gridfinity-tool-studio');
+      rq.onerror = () => reject(rq.error);
+      rq.onsuccess = () => {
+        const tx = rq.result.transaction('uploads', 'readwrite');
+        tx.objectStore('uploads').put(record, id);
+        tx.oncomplete = () => {
+          rq.result.close();
+          resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+  }, { id: KIT, parts: kitParts() });
+  await page.reload();
+  await open(page);
+  await page.locator('#tool').selectOption(KIT);
+  await expect(page.locator('#layoutPane')).toBeVisible();
+  await expect(page.locator('#partList [role=option]')).toHaveText(['Part 1', 'Part 2']);
+  await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+}
+
+/** Each visible part's pivot on the layout canvas (page px), in layout order. */
+async function partsOnScreen(page: Page): Promise<{ x: number; y: number }[]> {
+  const box = (await page.locator('#plan').boundingBox())!;
+  const parts = (await page.locator('#plan').getAttribute('data-parts'))!;
+  return parts.split(', ').map((s) => {
+    const [, x, y] = s.split(' ');
+    return { x: box.x + Number(x), y: box.y + Number(y) };
+  });
+}
+
+/** Scroll the inspector to the pocket settings, for a screenshot. */
+const showPocketSettings = (page: Page) => page.locator('.section-row').evaluate((el) => el.scrollIntoView({ block: 'start' }));
+
+async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }, hold?: () => Promise<void>) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await hold?.();
+  await page.mouse.up();
+}
+
+test('kit part settings: a depth for one part, a clearance for all, and the mixed state', async ({ page }) => {
+  const errors = pageErrors(page);
+  await recordOutlines(page);
+  await openKit(page);
+  const depths = async () => (await lastBuild(page))?.placements.map((pl) => pl.depth);
+  await expect(page.locator('#scopeText')).toHaveText('All parts (2)');
+  await expect(page.locator('#scopeClear')).toBeHidden();
+  await expect(page.locator('#rot')).toBeDisabled(); // parts turn one at a time
+  await expect(page.locator('#pocketDims')).toBeEmpty();
+
+  // part 2 alone
+  await page.locator('#partList [role=option]').nth(1).click();
+  await expect(page.locator('#scopeText')).toHaveText('Part 2');
+  await expect(page.locator('#rot')).toBeEnabled();
+  await expect(page.locator('#pocketDims')).toHaveText(/^Pocket [\d.]+ × [\d.]+ mm · tool [\d.]+ × [\d.]+ mm$/);
+  await setSlider(page, 'depth', 8);
+  await expect(page.locator('#depthV')).toHaveText('8');
+  await expect.poll(depths).toEqual([10, 8]);
+  await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+  await expect(page.locator('#depthNote')).toHaveText(/Cut depths: part 1 10 mm, part 2 8 mm\.$/);
+  await expect(page.locator('#depth').locator('..')).not.toHaveClass(/mixed/);
+  await showPocketSettings(page);
+  await page.screenshot({ path: test.info().outputPath('inspector-part.png') });
+
+  // nothing selected: both parts, whose depths differ
+  await page.locator('#scopeClear').click();
+  await expect(page.locator('#scopeText')).toHaveText('All parts (2)');
+  await expect(page.locator('#depthV')).toHaveText('Mixed');
+  await expect(page.locator('#depth').locator('..')).toHaveClass(/mixed/);
+  await expect(page.locator('#depth')).toHaveAttribute('aria-valuetext', 'Mixed');
+  await expect(page.locator('#clearanceV')).toHaveText('2.5');
+  await setSlider(page, 'clearance', 1);
+  await expect.poll(async () => (await lastBuild(page))?.placements.map((pl) => pl.clearance)).toEqual([1, 1]);
+  expect(await depths()).toEqual([10, 8]);
+  await expect(page.locator('#depthV')).toHaveText('Mixed');
+  expect(errors).toEqual([]);
+});
+
+test('kit bin size: locked at 3×2, a part dragged out sticks out', async ({ page }) => {
+  await recordOutlines(page);
+  await openKit(page);
+  // without finger slots (for both parts) the small parts fit a 3×2 bin
+  await page.locator('#slotOn').uncheck();
+  await expect(page.locator('#cells')).toHaveText('3×2');
+  await expect(page.locator('#autoSize')).toBeChecked();
+  await expect(page.locator('#cellsX')).toBeDisabled();
+  const auto = (await page.locator('#cells').textContent())!.split('×').map(Number);
+  await page.locator('#autoSize').uncheck();
+  await expect.poll(async () => (await lastLayout(page))?.cells).toEqual(auto);
+  await expect(page.locator('#cellsX')).toBeEnabled();
+  for (const [id, n] of [['cellsX', '3'], ['cellsY', '2']]) {
+    await page.locator(`#${id}`).fill(n!);
+    await page.locator(`#${id}`).dispatchEvent('change');
+  }
+  await expect(page.locator('#cells')).toHaveText('3×2');
+  await expect.poll(async () => (await lastLayout(page))?.cells).toEqual([3, 2]);
+  await expect(page.locator('#layoutWarnings li')).toHaveCount(0);
+
+  // part 1 dragged 60 mm left, past the bin's side
+  const s = Number(await page.locator('#plan').getAttribute('data-scale'));
+  const [p1] = await partsOnScreen(page);
+  await drag(page, p1!, { x: p1!.x - 60 * s, y: p1!.y });
+  await expect(page.locator('#layoutWarnings li')).toHaveText(['Part 1 sticks out of the locked 3×2 bin.']);
+  await expect(page.locator('#layoutWarnings')).toBeVisible();
+  await expect(page.locator('#partList li.warned')).toHaveText(['Part 1']);
+  await expect(page.locator('#partList li.warned')).toBeVisible();
+  await expect(page.locator('#cells')).toHaveText('3×2');
+
+  // auto again: the bin grows to fit
+  await page.locator('#autoSize').check();
+  await expect(page.locator('#layoutWarnings li')).toHaveCount(0);
+  await expect(page.locator('#cells')).not.toHaveText('3×2');
+  await expect(page.locator('#cellsX')).toBeDisabled();
+});
+
+test('kit warnings: parts dragged together will merge, and a hidden part comes back', async ({ page }) => {
+  const errors = pageErrors(page);
+  await recordOutlines(page);
+  await openKit(page);
+  // different depths, so with nothing selected the inspector shows Mixed
+  await page.locator('#partList [role=option]').nth(1).click();
+  await setSlider(page, 'depth', 8);
+  await expect.poll(async () => (await lastBuild(page))?.placements.map((pl) => pl.depth)).toEqual([10, 8]);
+
+  // part 2 onto part 1: ringed as too close while held, then the worker's warning
+  const [p1, p2] = await partsOnScreen(page);
+  await drag(page, p2!, { x: p1!.x + 6, y: p1!.y }, async () => {
+    await expect(page.locator('#plan')).toHaveAttribute('data-close', /p1/);
+  });
+  await expect(page.locator('#layoutWarnings li')).toHaveText(['Parts 1 and 2 overlap; their pockets will merge.']);
+  await expect(page.locator('#partList li.warned')).toHaveCount(2);
+  await expect(page.locator('#plan')).toHaveAttribute('data-close', '');
+  await expect(page.locator('#exp')).toHaveText(/Export STL/, { timeout: 60_000 });
+  await expect(page.locator('#exp')).toBeEnabled();
+  await expect(page.locator('#previewMsg')).toBeEmpty();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#scopeText')).toHaveText('All parts (2)');
+  await expect(page.locator('#depthV')).toHaveText('Mixed');
+  await showPocketSettings(page);
+  await page.screenshot({ path: test.info().outputPath('inspector-mixed.png') });
+
+  // hide part 1, then restore it from Hidden parts
+  await page.locator('#partList [role=option]').first().click();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('#partList [role=option]')).toHaveText(['Part 2']);
+  await expect(page.locator('#hiddenParts')).toBeVisible();
+  await expect(page.locator('#layoutWarnings li')).toHaveCount(0);
+  await expect.poll(async () => (await lastBuild(page))?.placements.map((pl) => !!pl.hidden)).toEqual([true, false]);
+  await page.getByRole('button', { name: 'Restore part 1' }).click();
+  await expect(page.locator('#partList [role=option]')).toHaveText(['Part 1', 'Part 2']);
+  await expect(page.locator('#hiddenParts')).toBeHidden();
+  await expect.poll(async () => (await lastBuild(page))?.placements.map((pl) => !!pl.hidden)).toEqual([false, false]);
+  expect(errors).toEqual([]);
 });

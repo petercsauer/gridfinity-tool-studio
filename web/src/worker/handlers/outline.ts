@@ -1,7 +1,9 @@
 // The 2D trace: every part's tool and pocket in its own frame (the layout places them), on the sheet where it
 // was photographed, the bin size (locked, or the footprint of the placed pockets) and the layout's warnings.
+import type { ManifoldToplevel } from 'manifold-3d';
+import { MIN_WALL } from '../../geometry/constants';
 import { checkLayout } from '../../geometry/kit-checks';
-import { bounds, effectiveDepth, maxDepth, rotate, type Ring, type Vec2 } from '../../geometry/pocket';
+import { bounds, ccw, effectiveDepth, maxDepth, rotate, signedArea, type Ring, type Vec2 } from '../../geometry/pocket';
 import { axisAngle, type Layout } from '../../kit';
 import { clampParams, type Params } from '../../params';
 import type { Deps } from '../deps';
@@ -40,7 +42,34 @@ export function measure(tool: Ring, pocket: Ring, up2sheet: Affine): Measurement
   };
 }
 
-function partTrace({ part, placement, tool, pocket }: PlacedPart): PartTrace {
+/** Points the live too-close ring is simplified to, at most (about). */
+const GROWN_POINTS = 150;
+
+/** `pocket` grown by half the least gap two pockets need (MIN_WALL plus both round-overs, as checkLayout),
+ * simplified to about GROWN_POINTS points: two pockets are too close when their grown rings meet. */
+export function grownRing(m: ManifoldToplevel, pocket: Ring, fillet: number): Ring {
+  const grow = (MIN_WALL + 2 * Math.max(0, fillet)) / 2;
+  const cs = new m.CrossSection([ccw(pocket)], 'Positive');
+  const grown = cs.offset(grow, 'Round', 2, 32);
+  cs.delete();
+  try {
+    let ring: Ring = [];
+    for (let eps = 0.02; ; eps *= 2) {
+      const simple = grown.simplify(eps);
+      ring = [];
+      for (const poly of simple.toPolygons()) {
+        const r = poly.map(([x, y]): Vec2 => [round(x, 2), round(y, 2)]);
+        if (Math.abs(signedArea(r)) > Math.abs(signedArea(ring))) ring = r;
+      }
+      simple.delete();
+      if (ring.length <= GROWN_POINTS || eps > 2) return ring;
+    }
+  } finally {
+    grown.delete();
+  }
+}
+
+function partTrace(m: ManifoldToplevel, fillet: number, { part, placement, tool, pocket }: PlacedPart): PartTrace {
   const { symmetry: sy, up2sheet } = part;
   const P0 = placement.sym ? sy.outline : part.outline;
   return {
@@ -55,6 +84,7 @@ function partTrace({ part, placement, tool, pocket }: PlacedPart): PartTrace {
     symmetryScore: sy.score,
     axisDeg: axisAngle(part),
     measure: measure(tool, pocket, up2sheet),
+    grown: grownRing(m, pocket, fillet),
   };
 }
 
@@ -62,7 +92,7 @@ export async function outline(raw: Params, { manifold, presets }: Deps, layout?:
   const p = clampParams(raw);
   const preset = await presets.get(p.tool);
   const kit = placeKit(manifold, preset, p, layout);
-  const parts = kit.all.map(partTrace);
+  const parts = kit.all.map((q) => partTrace(manifold, p.fillet, q));
   const first = kit.visible[0]!;
   const firstTrace = parts[kit.all.indexOf(first)]!;
   const { nx, ny, locked, pockets } = binLayout(kit, p);
