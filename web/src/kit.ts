@@ -51,7 +51,8 @@ export interface Placement extends PartSettings {
 
 export interface Layout {
   placements: Placement[];
-  /** A locked bin size [nx, ny] in grid cells; without it the bin grows to fit the parts. */
+  /** A locked bin size [nx, ny] in grid cells, centred on the origin, so placement positions are bin
+   * coordinates; without it the bin grows to fit the parts and is centred on them. */
   cells?: [number, number];
 }
 

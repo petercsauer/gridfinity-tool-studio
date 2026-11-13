@@ -1,9 +1,9 @@
 // A kit's pockets: each part's tool and pocket made in its own upright frame with its own settings, then
 // turned and moved into the bin by its placement. Shared by the outline and build handlers.
 import type { ManifoldToplevel } from 'manifold-3d';
-import { bounds, makePocket, type Ring, type Vec2 } from '../../geometry/pocket';
+import { bounds, footprint, makePocket, type Ring, type Vec2 } from '../../geometry/pocket';
 import { placeRing, resolveLayout, type Layout, type Part, type Placement } from '../../kit';
-import type { Params } from '../../params';
+import { clamp, MAX_CELLS, type Params } from '../../params';
 import { partsOf, type PresetData } from '../presets';
 import { PipelineError } from '../protocol';
 
@@ -42,9 +42,32 @@ export function placeKit(m: ManifoldToplevel, preset: PresetData, p: Params, req
 }
 
 /** The pockets moved so their combined bounding box is centred on the origin, as the bin's are. */
-export function centred(rings: readonly Ring[]): Ring[] {
+function centred(rings: readonly Ring[]): Ring[] {
   const b = bounds(rings.flat());
   const cx = (b.xmin + b.xmax) / 2;
   const cy = (b.ymin + b.ymax) / 2;
   return rings.map((P) => P.map(([x, y]): Vec2 => [x - cx, y - cy]));
+}
+
+export interface BinLayout {
+  nx: number;
+  ny: number;
+  /** Whether the size is the layout's locked `cells`. */
+  locked: boolean;
+  /** The visible pockets where they are cut (mm, bin centred on the origin). */
+  pockets: Ring[];
+}
+
+/** The bin for a kit: a locked size as given (whole cells, or half cells with half-grid feet, at most
+ * MAX_CELLS) with the placements as bin coordinates; else the pockets' footprint with them centred. */
+export function binLayout(kit: PlacedKit, p: Params): BinLayout {
+  const placed = kit.visible.map((q) => q.placedPocket);
+  const { cells } = kit.layout;
+  if (cells) {
+    const step = p.halfGrid ? 0.5 : 1;
+    const n = (v: number) => clamp(Math.round((Number.isFinite(v) ? v : 1) / step) * step, step, MAX_CELLS);
+    return { nx: n(cells[0]), ny: n(cells[1]), locked: true, pockets: placed };
+  }
+  const [nx, ny] = footprint(placed, p.fillet, p.halfGrid);
+  return { nx, ny, locked: false, pockets: centred(placed) };
 }
