@@ -1,13 +1,15 @@
 // The Layout pane: a top-down view of the bin (cells, outer wall, usable inset) with every visible part's
 // pocket and tool where its placement puts it, in bin mm (y up). Parts are dragged to move them and turned by
 // a handle, with the part's axis snapping to 0/90/180/270° (Alt turns freely). Keys and a DOM part list do
-// everything a drag does (WCAG 2.5.7); an aria-live line reports each change.
+// everything a drag does (WCAG 2.5.7); an aria-live line reports each change. The layout's warnings are listed
+// under the caption and badge their parts; while a part is dragged, parts too close to it are ringed at once.
 import { GRID, LIP_INSET, MIN_WALL } from './geometry/constants';
-import { binSize, bounds, footprint, rotate, type Ring, type Vec2 } from './geometry/pocket';
+import { binSize, bounds, footprint, rotate, type Box2, type Ring, type Vec2 } from './geometry/pocket';
 import { normalizeDeg, placeRing, type Layout, type Placement } from './kit';
+import { clamp, MAX_CELLS } from './params';
 import { isDark } from './trace';
 import { centroid } from './vision/symmetry';
-import type { PartTrace } from './worker/protocol';
+import type { LayoutWarning, PartTrace } from './worker/protocol';
 
 /** Snap the axis within this many degrees of a multiple of 90, and let go of it beyond RELEASE. */
 export const SNAP = 5;
@@ -77,13 +79,52 @@ export function turnAbout(pl: Placement, c: Vec2, rot: number): Placement {
   return { ...pl, rot, x: px - rx, y: py - ry };
 }
 
-/** The bin a set of placed pockets needs: its size in cells and its outer rectangle (centred on them). */
-function binOf(pockets: readonly Ring[], fillet: number, halfGrid: boolean) {
-  const [nx, ny] = footprint(pockets, fillet, halfGrid);
+/** A locked size as the worker cuts it: whole cells (half cells with half-grid feet), 1 step to MAX_CELLS. */
+export function lockedCells(cells: readonly [number, number], halfGrid: boolean): [number, number] {
+  const step = halfGrid ? 0.5 : 1;
+  const n = (v: number) => clamp(Math.round((Number.isFinite(v) ? v : 1) / step) * step, step, MAX_CELLS);
+  return [n(cells[0]), n(cells[1])];
+}
+
+/** The bin for a set of placed pockets: a locked size centred on the origin, else the size they need centred
+ * on them; its outer rectangle, and the pockets' extent. */
+function binOf(pockets: readonly Ring[], fillet: number, halfGrid: boolean, cells?: readonly [number, number]) {
   const b = bounds(pockets.flat());
-  const cx = (b.xmin + b.xmax) / 2;
-  const cy = (b.ymin + b.ymax) / 2;
-  return { nx, ny, cx, cy, w: binSize(nx), h: binSize(ny), pw: b.xmax - b.xmin, ph: b.ymax - b.ymin };
+  const [nx, ny] = cells ? lockedCells(cells, halfGrid) : footprint(pockets, fillet, halfGrid);
+  const cx = cells ? 0 : (b.xmin + b.xmax) / 2;
+  const cy = cells ? 0 : (b.ymin + b.ymax) / 2;
+  return { nx, ny, cx, cy, w: binSize(nx), h: binSize(ny), pw: b.xmax - b.xmin, ph: b.ymax - b.ymin, b };
+}
+
+const apart = (a: Box2, b: Box2) => a.xmin > b.xmax || b.xmin > a.xmax || a.ymin > b.ymax || b.ymin > a.ymax;
+
+/** Whether segments pq and rs cross or touch. */
+function crosses([px, py]: Vec2, [qx, qy]: Vec2, [rx, ry]: Vec2, [sx, sy]: Vec2): boolean {
+  const d1 = (sx - rx) * (py - ry) - (sy - ry) * (px - rx);
+  const d2 = (sx - rx) * (qy - ry) - (sy - ry) * (qx - rx);
+  const d3 = (qx - px) * (ry - py) - (qy - py) * (rx - px);
+  const d4 = (qx - px) * (sy - py) - (qy - py) * (sx - px);
+  return ((d1 <= 0 && d2 >= 0) || (d1 >= 0 && d2 <= 0)) && ((d3 <= 0 && d4 >= 0) || (d3 >= 0 && d4 <= 0))
+    && Math.min(px, qx) <= Math.max(rx, sx) && Math.min(rx, sx) <= Math.max(px, qx)
+    && Math.min(py, qy) <= Math.max(ry, sy) && Math.min(ry, sy) <= Math.max(py, qy);
+}
+
+/** Whether two grown pocket rings (PartTrace.grown, placed) meet: their pockets overlap or leave a wall
+ * thinner than the minimum. The live check while dragging; the worker's checkLayout has the last word. */
+export function tooClose(a: Ring, b: Ring): boolean {
+  if (!a.length || !b.length) return false;
+  const A = bounds(a);
+  if (apart(A, bounds(b))) return false;
+  if (inRing(a[0]!, b) || inRing(b[0]!, a)) return true;
+  // only b's edges that reach a's box can cross one of a's
+  for (let j = 0, l = b.length - 1; j < b.length; l = j++) {
+    const r = b[l]!;
+    const t = b[j]!;
+    if (Math.max(r[0], t[0]) < A.xmin || Math.min(r[0], t[0]) > A.xmax
+      || Math.max(r[1], t[1]) < A.ymin || Math.min(r[1], t[1]) > A.ymax) continue;
+    for (let i = 0, k = a.length - 1; i < a.length; k = i++) if (crosses(a[k]!, a[i]!, r, t)) return true;
+  }
+  return false;
 }
 
 function rgba(col: string, a: number): string {
@@ -103,6 +144,8 @@ export interface LayoutKit {
   layout: Layout;
   fillet: number;
   halfGrid: boolean;
+  /** The worker's warnings for this layout. */
+  warnings?: LayoutWarning[];
 }
 
 export interface LayoutHooks {
@@ -110,6 +153,8 @@ export interface LayoutHooks {
   change(layout: Layout): void;
   /** The bin's size while a drag is under way, before the worker has seen it. */
   live(f: { nx: number; ny: number; w: number; h: number }): void;
+  /** The selected part changed (null: none). */
+  select(id: string | null): void;
 }
 
 interface Drag {
@@ -135,9 +180,12 @@ export class LayoutView {
   private past: Layout[] = [];
   private future: Layout[] = [];
   private listIds = '';
+  /** Parts the worker warned about, and (while dragging) the parts too close to the dragged one. */
+  private warned = new Set<string>();
+  private close = new Set<string>();
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly list: HTMLElement,
-    private readonly status: HTMLElement, private readonly hooks: LayoutHooks) {
+    private readonly status: HTMLElement, private readonly warnList: HTMLElement, private readonly hooks: LayoutHooks) {
     this.ctx = canvas.getContext('2d')!;
     canvas.addEventListener('pointerdown', (e) => this.down(e));
     canvas.addEventListener('pointermove', (e) => this.move(e));
@@ -162,13 +210,26 @@ export class LayoutView {
     this.kit = kit;
     if (!this.drag) this.layout = kit.layout;
     if (this.selected && !this.visible().some((pl) => pl.part === this.selected)) this.selected = null;
+    this.syncWarnings();
     this.syncList();
     this.draw();
   }
 
-  /** Commit a layout made elsewhere (the Rotation slider), with undo. */
-  apply(layout: Layout): void {
-    this.commit(layout);
+  /** The selected part, or null. */
+  get selection(): string | null {
+    return this.selected;
+  }
+
+  /** Commit a layout made elsewhere (the inspector), with undo back to `prev`. */
+  apply(layout: Layout, prev: Layout = this.layout): void {
+    this.commit(layout, prev);
+  }
+
+  /** Show a layout made elsewhere while it is still being edited (a slider held), without undo. */
+  preview(layout: Layout): void {
+    if (this.drag) return;
+    this.layout = layout;
+    this.draw();
   }
 
   private visible(): Placement[] {
@@ -179,8 +240,28 @@ export class LayoutView {
     return this.kit?.parts.find((q) => q.id === id);
   }
 
+  private num(id: string): number {
+    return this.layout.placements.findIndex((pl) => pl.part === id) + 1;
+  }
+
   private label(id: string): string {
-    return `Part ${this.layout.placements.findIndex((pl) => pl.part === id) + 1}`;
+    return `Part ${this.num(id)}`;
+  }
+
+  /** The worker's warnings as sentences under the caption, and the parts they name. */
+  private syncWarnings(): void {
+    const ws = this.kit?.warnings ?? [];
+    const [nx, ny] = this.layout.cells ? lockedCells(this.layout.cells, !!this.kit?.halfGrid) : [0, 0];
+    this.warned = new Set(ws.flatMap((w) => w.parts.filter((id): id is string => !!id)));
+    this.warnList.replaceChildren(...ws.map((w) => {
+      const li = document.createElement('li');
+      const [a, b] = w.parts.map((id) => this.num(id ?? ''));
+      li.textContent = w.kind === 'overlap' ? `Parts ${a} and ${b} overlap; their pockets will merge.`
+        : w.kind === 'thin-wall' ? `The wall between parts ${a} and ${b} is thinner than ${MIN_WALL} mm.`
+          : `Part ${a} sticks out of the locked ${nx}×${ny} bin.`;
+      return li;
+    }));
+    this.warnList.hidden = !ws.length;
   }
 
   private describe(id: string): string {
@@ -229,12 +310,13 @@ export class LayoutView {
   }
 
   // ---- selection and the part list
-  private select(id: string | null, focusList = false): void {
+  select(id: string | null, focusList = false): void {
     this.selected = id;
     this.syncList();
     if (focusList && id) this.list.querySelector<HTMLElement>(`[data-part="${CSS.escape(id)}"]`)?.focus();
     this.draw();
     this.say(id ? this.describe(id) : 'No part selected.');
+    this.hooks.select(id);
   }
 
   private syncList(): void {
@@ -254,6 +336,7 @@ export class LayoutView {
     for (const li of this.list.querySelectorAll<HTMLElement>('[role=option]')) {
       li.setAttribute('aria-selected', String(li.dataset.part === this.selected));
       li.tabIndex = li.dataset.part === current ? 0 : -1;
+      li.classList.toggle('warned', this.warned.has(li.dataset.part!));
     }
   }
 
@@ -290,9 +373,9 @@ export class LayoutView {
         this.say('A bin needs at least one part.');
       } else {
         const label = this.label(id);
-        this.selected = null;
+        this.select(null);
         this.edit(id, (pl) => ({ ...pl, hidden: true }));
-        this.say(`${label} removed. Undo brings it back.`);
+        this.say(`${label} removed. Restore it under Hidden parts.`);
       }
     } else {
       return;
@@ -353,8 +436,9 @@ export class LayoutView {
     }
     d.moved = true;
     this.layout = { ...d.start, placements: d.start.placements.map((q) => (q.part === d.part ? pl : q)) };
+    this.close = this.tooCloseTo(d.part);
     const kit = this.kit!;
-    const bin = binOf(this.pockets(), kit.fillet, kit.halfGrid);
+    const bin = binOf(this.pockets(), kit.fillet, kit.halfGrid, this.layout.cells);
     this.hooks.live({ nx: bin.nx, ny: bin.ny, w: bin.pw, h: bin.ph });
     this.draw();
   }
@@ -363,6 +447,7 @@ export class LayoutView {
     const d = this.drag;
     if (!d || e.pointerId !== d.pointer) return;
     this.drag = null; // before the capture is released, so lostpointercapture doesn't revert
+    this.close.clear();
     if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
     if (d.moved) {
       this.commit(this.layout, d.start);
@@ -375,9 +460,10 @@ export class LayoutView {
     const d = this.drag;
     if (!d || e.pointerId !== d.pointer) return;
     this.drag = null;
+    this.close.clear();
     this.layout = d.start;
     if (this.kit) {
-      const bin = binOf(this.pockets(), this.kit.fillet, this.kit.halfGrid);
+      const bin = binOf(this.pockets(), this.kit.fillet, this.kit.halfGrid, this.layout.cells);
       this.hooks.live({ nx: bin.nx, ny: bin.ny, w: bin.pw, h: bin.ph });
     }
     this.draw();
@@ -386,6 +472,22 @@ export class LayoutView {
   // ---- geometry
   private pockets(): Ring[] {
     return this.visible().map((pl) => placeRing(this.trace(pl.part)?.pocket ?? [], pl)).filter((P) => P.length);
+  }
+
+  /** A part's grown ring where its placement puts it (empty without one). */
+  private grown(pl: Placement): Ring {
+    const g = this.trace(pl.part)?.grown;
+    return g ? placeRing(g, pl) : [];
+  }
+
+  /** The parts too close to `id`, and it when any is, by their grown rings. */
+  private tooCloseTo(id: string): Set<string> {
+    const vis = this.visible();
+    const me = vis.find((pl) => pl.part === id);
+    const out = new Set<string>();
+    const a = me ? this.grown(me) : [];
+    for (const pl of vis) if (pl.part !== id && tooClose(a, this.grown(pl))) out.add(pl.part).add(id);
+    return out;
   }
 
   /** The selected part's rotation handle (bin mm), the point its stem starts from and the part's axis. */
@@ -413,15 +515,19 @@ export class LayoutView {
     const kit = this.kit;
     const pockets = this.pockets();
     if (!kit || !pockets.length) return;
-    const bin = binOf(pockets, kit.fillet, kit.halfGrid);
-    // fit the bin (plus room for the handles) to the pane; a drag keeps the scale it started with
+    const bin = binOf(pockets, kit.fillet, kit.halfGrid, this.layout.cells);
+    // fit the bin and the parts (plus room for the handles) to the pane below the warnings; a drag keeps the
+    // scale it started with
     if (!this.drag) {
-      const w = bin.w + 2 * MARGIN_MM;
-      const h = bin.h + 2 * MARGIN_MM;
-      const s = Math.max(1e-3, Math.min((r.width - 2 * PAD.x) / w, (r.height - PAD.top - PAD.bottom) / h));
+      const x0 = Math.min(bin.cx - bin.w / 2, bin.b.xmin) - MARGIN_MM;
+      const x1 = Math.max(bin.cx + bin.w / 2, bin.b.xmax) + MARGIN_MM;
+      const y0 = Math.min(bin.cy - bin.h / 2, bin.b.ymin) - MARGIN_MM;
+      const y1 = Math.max(bin.cy + bin.h / 2, bin.b.ymax) + MARGIN_MM;
+      const top = PAD.top + (this.warnList.hidden ? 0 : this.warnList.offsetHeight + 8);
+      const s = Math.max(1e-3, Math.min((r.width - 2 * PAD.x) / (x1 - x0), (r.height - top - PAD.bottom) / (y1 - y0)));
       const xc = r.width / 2;
-      const yc = PAD.top + (r.height - PAD.top - PAD.bottom) / 2;
-      this.xf = { s, ox: xc - bin.cx * s, oy: yc + bin.cy * s, dpr };
+      const yc = top + (r.height - top - PAD.bottom) / 2;
+      this.xf = { s, ox: xc - ((x0 + x1) / 2) * s, oy: yc + ((y0 + y1) / 2) * s, dpr };
       canvas.dataset.scale = s.toFixed(4);
     }
     const xf = this.xf;
@@ -502,8 +608,24 @@ export class LayoutView {
       ctx.stroke();
     }
 
-    // parts: pockets then tools, the selected one emphasised
+    // while dragging: the grown rings of parts too close together, dashed
     const vis = this.visible();
+    canvas.dataset.close = [...this.close].join(' ');
+    canvas.dataset.parts = vis.map((pl) => {
+      const c = S(placeRing([this.pivotOf(pl.part)], pl)[0]!);
+      return `${pl.part} ${(c[0] / dpr).toFixed(1)} ${(c[1] / dpr).toFixed(1)}`;
+    }).join(', ');
+    for (const pl of vis) {
+      if (!this.close.has(pl.part)) continue;
+      path(this.grown(pl));
+      ctx.setLineDash([5 * dpr, 4 * dpr]);
+      ctx.lineWidth = 1.6 * dpr;
+      ctx.strokeStyle = col('--destructive');
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // parts: pockets then tools, the selected one emphasised
     vis.forEach((pl) => {
       const t = this.trace(pl.part);
       if (!t) return;
@@ -529,6 +651,26 @@ export class LayoutView {
       ctx.strokeStyle = cTool;
       ctx.stroke();
     });
+
+    // a warning badge at the top right of every part a warning names
+    for (const pl of vis) {
+      const t = this.trace(pl.part);
+      if (!t || this.drag || !this.warned.has(pl.part)) continue;
+      const b = bounds(placeRing(t.pocket, pl));
+      const [x, y] = S([b.xmax, b.ymax]);
+      ctx.beginPath();
+      ctx.arc(x, y, 7 * dpr, 0, 2 * Math.PI);
+      ctx.fillStyle = col('--orange');
+      ctx.fill();
+      ctx.lineWidth = 2 * dpr;
+      ctx.strokeStyle = halo;
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = `700 ${10 * dpr}px ${col('--font')}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('!', x, y + 0.5 * dpr);
+    }
 
     // the selected part's axis (along which it snaps) and its rotation handle
     const h = this.selected ? this.handle(this.selected) : null;

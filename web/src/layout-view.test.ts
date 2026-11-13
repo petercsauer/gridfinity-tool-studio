@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import type { ManifoldToplevel } from 'manifold-3d';
+import { checkLayout } from './geometry/kit-checks';
+import { initManifold } from './geometry/manifold';
 import type { Ring, Vec2 } from './geometry/pocket';
 import { placeRing, type Placement } from './kit';
-import { binToScreen, hitTest, inRing, screenToBin, snapRot, turnAbout, type ViewXf } from './layout-view';
+import { binToScreen, hitTest, inRing, lockedCells, screenToBin, snapRot, tooClose, turnAbout, type ViewXf } from './layout-view';
 import { DEFAULTS } from './params';
+import { grownRing } from './worker/handlers/outline';
 
 const square = (cx: number, cy: number, s: number): Ring => [[cx - s, cy - s], [cx + s, cy - s], [cx + s, cy + s], [cx - s, cy + s]];
 
@@ -80,5 +84,45 @@ describe('turnAbout', () => {
     const after = placeRing([c], t)[0]!;
     expect(after[0]).toBeCloseTo(before[0], 9);
     expect(after[1]).toBeCloseTo(before[1], 9);
+  });
+});
+
+describe('tooClose', () => {
+  let m: ManifoldToplevel;
+  beforeAll(async () => {
+    m = await initManifold();
+  });
+  const fillet = 3.175; // pockets closer than 1.2 + 2 * 3.175 = 7.55 mm are too close
+  const rect = (x0: number, y0: number, w: number, h: number): Ring => [[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h]];
+  const cases: [string, Ring, Ring, boolean][] = [
+    ['overlapping', rect(-20, -10, 25, 20), rect(0, -10, 20, 20), true],
+    ['one inside the other', rect(-20, -20, 40, 40), rect(-5, -5, 10, 10), true],
+    ['0.5 mm apart', rect(-20, -10, 19.75, 20), rect(0.25, -10, 20, 20), true],
+    ['5 mm apart', rect(-25, -10, 20, 20), rect(0, -10, 20, 20), true],
+    ['15 mm apart', rect(-27.5, -10, 20, 20), rect(7.5, -10, 20, 20), false],
+    ['corner to corner, 8.5 mm apart (round bands)', rect(-20, -20, 20, 20), rect(6, 6, 20, 20), false],
+  ];
+
+  it.each(cases)('%s: agrees with the worker', (_, a, b, close) => {
+    const ga = grownRing(m, a, fillet);
+    const gb = grownRing(m, b, fillet);
+    expect(tooClose(ga, gb)).toBe(close);
+    expect(tooClose(gb, ga)).toBe(close);
+    expect(checkLayout(m, [{ id: 'a', ring: a }, { id: 'b', ring: b }], { fillet }).length > 0).toBe(close);
+  });
+
+  it('simplifies a detailed pocket to about 150 points', () => {
+    const P: Ring = Array.from({ length: 720 }, (_, i): Vec2 => [40 * Math.cos((i * Math.PI) / 360), 25 * Math.sin((i * Math.PI) / 360)]);
+    const g = grownRing(m, P, fillet);
+    expect(g.length).toBeGreaterThan(20);
+    expect(g.length).toBeLessThanOrEqual(150);
+  });
+});
+
+describe('lockedCells', () => {
+  it('rounds to whole or half cells, from one step to MAX_CELLS', () => {
+    expect(lockedCells([2.4, 0], false)).toEqual([2, 1]);
+    expect(lockedCells([2.4, 12], true)).toEqual([2.5, 8]);
+    expect(lockedCells([Number.NaN, 0.2], true)).toEqual([1, 0.5]);
   });
 });

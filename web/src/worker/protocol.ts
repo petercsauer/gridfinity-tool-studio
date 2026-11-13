@@ -31,6 +31,9 @@ export interface PartTrace {
   symmetryScore: number;
   axisDeg: number;
   measure: Measurements;
+  /** The pocket grown by half the least gap between two pockets and simplified (part frame), for the live
+   * too-close check while a part is dragged: two parts are too close when these meet. */
+  grown?: Ring;
 }
 
 export interface OutlineResult {
