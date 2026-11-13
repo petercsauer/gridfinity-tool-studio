@@ -1,14 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { liveObjects } from '../../geometry/bin';
 import { initManifold } from '../../geometry/manifold';
-import { bounds, footprint, makePocket } from '../../geometry/pocket';
+import { bounds, footprint, makePocket, type Ring } from '../../geometry/pocket';
 import { placeRing, settingsFromParams, type Layout } from '../../kit';
 import { hausdorff, presetFixture, TOOLS } from '../../test/fixtures';
 import { DEFAULTS } from '../../params';
 import type { Deps } from '../deps';
 import { partFromPreset, withUploads, type PresetData, type PresetSource } from '../presets';
-import { PipelineError } from '../protocol';
+import { PipelineError, type OutlineResult } from '../protocol';
 import { build } from './build';
 import { outline } from './outline';
 
@@ -219,4 +220,99 @@ describe('kits with several parts', () => {
     expect(turned.w).toBeCloseTo(straight.h, 1);
     expect(turned.h).toBeCloseTo(straight.w, 1);
   });
+
+  it('gives each placement its own finger slot, across the part at any angle', async () => {
+    const own = settingsFromParams(params);
+    const r = await outline(params, kd, {
+      placements: [
+        { part: 'p1', x: -40, y: 0, rot: 90, ...own, slotOn: true, slotOver: 20 },
+        { part: 'p1', x: 40, y: 0, rot: 90, ...own, slotOn: false },
+      ],
+    });
+    const box = (i: number) => {
+      const b = bounds(placeRing(r.parts[i]!.pocket, r.layout.placements[i]!));
+      return { w: b.xmax - b.xmin, h: b.ymax - b.ymin };
+    };
+    const slotted = box(0), plain = box(1);
+    // the slot runs along the bin's y (across the turned part): it adds the pill's length past the pocket there,
+    // the crossing width plus 2 * (slotOver + slotR), and nothing along the part
+    const tb = bounds(r.parts[0]!.tool);
+    const pill = tb.xmax - tb.xmin + 2 * (own.clearance + 20 + own.slotR);
+    expect(slotted.h).toBeGreaterThan(plain.h + 1);
+    expect(slotted.h).toBeLessThanOrEqual(pill + 0.5);
+    expect(slotted.w).toBeCloseTo(plain.w, 1);
+  });
+
+  it('uses a locked bin size as given, with the placements as bin coordinates', async () => {
+    const flat = { ...params, fillet: 0 };
+    const outside = (r: OutlineResult) => r.warnings?.filter((w) => w.kind === 'outside');
+    const auto = await outline(flat, kd, layout(60));
+    const cells: [number, number] = [auto.nx, auto.ny];
+    // the auto bin is centred on the pockets; the same placements moved there fit it once locked
+    const b = bounds(auto.parts.flatMap((q, i) => placeRing(q.pocket, auto.layout.placements[i]!)));
+    const at = (dx: number) => auto.layout.placements.map((q) => ({ ...q, x: q.x - (b.xmin + b.xmax) / 2 + dx, y: q.y - (b.ymin + b.ymax) / 2 }));
+    const fits = await outline(flat, kd, { placements: at(0), cells });
+    expect([fits.nx, fits.ny]).toEqual(cells);
+    expect(outside(fits)).toEqual([]);
+    // moved 40 mm right, the stripper leaves the locked bin rather than the bin following the parts
+    expect(outside(await outline(flat, kd, { placements: at(40) }))).toEqual([]);
+    expect(outside(await outline(flat, kd, { placements: at(40), cells }))).toEqual([{ kind: 'outside', parts: ['p2'] }]);
+    const bigger = await outline(flat, kd, { ...layout(60), cells: [8, 8] });
+    expect([bigger.nx, bigger.ny]).toEqual([8, 8]);
+  });
+
+  it('warns of overlapping parts in the outline and builds them merged, each at its own depth', async () => {
+    const flat = { ...params, fillet: 0, u: 6 };
+    const own = settingsFromParams(flat);
+    const kit: Layout = {
+      placements: [
+        { part: 'p1', x: 0, y: 0, rot: 0, ...own, depth: 8 },
+        { part: 'p2', x: 10, y: 0, rot: 0, ...own, depth: 20 },
+        { part: 'p1', x: 0, y: 0, rot: 0, ...own, hidden: true },
+      ],
+    };
+    const o = await outline(flat, kd, kit);
+    expect(o.warnings).toEqual([{ kind: 'overlap', parts: ['p1', 'p2'] }]);
+    const b = await build(flat, kd, kit);
+    expect(b.effectiveDepths).toEqual([8, 20, 0]);
+    expect(b.effectiveDepth).toBe(20);
+  });
+});
+
+describe('kit build performance', () => {
+  /** Twelve fixture parts (each tool three times, at 40%, so they fit an 8x8 bin) as one preset. */
+  const SCALE = 0.4;
+  const ids = Array.from({ length: 12 }, (_, i) => `p${i + 1}`);
+  const twelve: PresetSource = {
+    ...diskPresets,
+    get: async (id) => {
+      if (id !== 'twelve') return diskPresets.get(id);
+      const tools = await Promise.all(TOOLS.map((t) => diskPresets.get(t)));
+      const parts = ids.map((pid, i) => {
+        const part = partFromPreset(tools[i % TOOLS.length]!, pid);
+        const s = (P: Ring): Ring => P.map(([x, y]) => [x * SCALE, y * SCALE]);
+        return { ...part, outline: s(part.outline), symmetry: { ...part.symmetry, outline: s(part.symmetry.outline) } };
+      });
+      return { ...tools[0]!, id: 'twelve', parts };
+    },
+  };
+
+  it('builds 12 placed parts, each with its own depth, in under 5 s and frees everything', async () => {
+    // without round-overs: their stepped layers cost each pocket as much as a single tool's bin (seconds)
+    const params = { ...DEFAULTS, tool: 'twelve', sym: false, u: 5, slotR: 5, slotOver: 2, fillet: 0 };
+    const own = settingsFromParams(params);
+    // six columns of two rows
+    const layout: Layout = {
+      placements: ids.map((part, i) => ({
+        part, x: -112.5 + 45 * (i % 6), y: i < 6 ? -50 : 50, rot: 0, ...own, depth: 6 + (i % 4) * 4,
+      })),
+    };
+    const kd: Deps = { ...deps, presets: twelve };
+    const t0 = performance.now();
+    const r = await build(params, kd, layout);
+    const ms = performance.now() - t0;
+    expect(r.effectiveDepths).toEqual(layout.placements.map((q) => q.depth));
+    expect(ms).toBeLessThan(5000);
+    expect(liveObjects()).toBe(0);
+  }, 120_000);
 });

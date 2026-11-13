@@ -1,6 +1,7 @@
 // Typed request/response protocol between the UI thread and the pipeline worker.
 // Every request carries a per-kind `version`; the client drops responses to requests
 // that a newer request of the same kind has superseded.
+import type { LayoutWarning } from '../geometry/kit-checks';
 import type { Box2, Ring, Vec2 } from '../geometry/pocket';
 import type { Layout, Part } from '../kit';
 import type { Params } from '../params';
@@ -61,7 +62,11 @@ export interface OutlineResult {
   symmetryScore: number;
   /** Pocket and tool sizes along the tool's own upright axes, for the dimension labels on the trace. */
   measure?: Measurements;
+  /** Overlapping pockets, too-thin walls between pockets and pockets outside a locked bin (see checkLayout). */
+  warnings?: LayoutWarning[];
 }
+
+export type { LayoutWarning };
 
 /** The unrotated pocket and tool measured in the upright outline frame (x across the tool, y along it). */
 export interface Measurements {
@@ -82,7 +87,9 @@ export interface BuildResult {
   /** Bin mesh in mm, Z up: xyz per vertex and three vertex indices per triangle. */
   positions: Float32Array;
   indices: Uint32Array;
+  /** The deepest pocket cut, and each layout placement's (0 for hidden ones), in layout order. */
   effectiveDepth: number;
+  effectiveDepths?: number[];
   nx: number;
   ny: number;
 }

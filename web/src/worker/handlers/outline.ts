@@ -1,12 +1,13 @@
 // The 2D trace: every part's tool and pocket in its own frame (the layout places them), on the sheet where it
-// was photographed, and the footprint of the placed pockets.
-import { bounds, effectiveDepth, footprint, maxDepth, rotate, type Ring, type Vec2 } from '../../geometry/pocket';
+// was photographed, the bin size (locked, or the footprint of the placed pockets) and the layout's warnings.
+import { checkLayout } from '../../geometry/kit-checks';
+import { bounds, effectiveDepth, maxDepth, rotate, type Ring, type Vec2 } from '../../geometry/pocket';
 import { axisAngle, type Layout } from '../../kit';
 import { clampParams, type Params } from '../../params';
 import type { Deps } from '../deps';
 import type { Measurements, OutlineResult, PartTrace } from '../protocol';
 import type { Affine } from '../../vision/outline';
-import { placeKit, type PlacedPart } from './placed';
+import { binLayout, placeKit, type PlacedPart } from './placed';
 
 const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;
 
@@ -64,8 +65,7 @@ export async function outline(raw: Params, { manifold, presets }: Deps, layout?:
   const parts = kit.all.map(partTrace);
   const first = kit.visible[0]!;
   const firstTrace = parts[kit.all.indexOf(first)]!;
-  const pockets = kit.visible.map((q) => q.placedPocket);
-  const [nx, ny] = footprint(pockets, p.fillet, p.halfGrid);
+  const { nx, ny, locked, pockets } = binLayout(kit, p);
   const b = bounds(pockets.flat());
   const depth = Math.max(...kit.visible.map((q) => q.placement.depth));
   return {
@@ -86,5 +86,7 @@ export async function outline(raw: Params, { manifold, presets }: Deps, layout?:
     effectiveDepth: effectiveDepth(p.u, depth, p),
     symmetryScore: firstTrace.symmetryScore,
     measure: firstTrace.measure,
+    warnings: checkLayout(
+      manifold, pockets.map((ring, i) => ({ id: kit.visible[i]!.part.id, ring })), p, locked ? [nx, ny] : undefined),
   };
 }
