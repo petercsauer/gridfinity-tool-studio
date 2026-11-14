@@ -15,6 +15,13 @@ export interface PocketParams {
   slotR: number;
   slotOver: number;
   slotFrac: number;
+  /** How much of the slot's full length (across the pocket and slotOver past it) is cut: 1 (the default) for
+   * all of it, down to 0 for a round hole of the slot's radius in the middle. */
+  slotSpan?: number;
+  /** A round finger hole centred on the part's narrower end (an antenna's tip) instead of a slot across it… */
+  slotTip?: boolean;
+  /** …or on its other end. */
+  slotFlip?: boolean;
 }
 
 export interface Pocket {
@@ -128,8 +135,28 @@ function crossingsX(contours: readonly (readonly Vec2[])[], yy: number): [number
   return lo <= hi ? [lo, hi] : null;
 }
 
+/** The tip of an upright outline: its extreme point (lowest or highest y) at whichever end is narrower, measured
+ * 10% of its length in from each end, or with `other` at the wider end. */
+export function tipPoint(contours: readonly (readonly Vec2[])[], other = false): Vec2 | null {
+  const pts = contours.flat();
+  if (!pts.length) return null;
+  const ys = pts.map((q) => q[1]);
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const L = y1 - y0;
+  const width = (yy: number) => {
+    const c = crossingsX(contours, yy);
+    return c ? c[1] - c[0] : Infinity;
+  };
+  const top = (width(y0 + 0.1 * L) <= width(y1 - 0.1 * L)) !== other;
+  const yEnd = top ? y0 : y1;
+  // the extreme points at that end, averaged (a blunt tip has several)
+  const end = pts.filter((q) => Math.abs(q[1] - yEnd) < 1e-6 * Math.max(1, L) + 1e-9);
+  return [end.reduce((a, q) => a + q[0], 0) / end.length, yEnd];
+}
+
 /** Tool polygon and pocket polygon: the tool grown by `clearance` (round joins) plus a
- * stadium finger slot across the tool at `slotFrac` of the pocket's height. `slotFrac`
+ * stadium finger slot across the tool at `slotFrac` of the pocket's height (or, with `slotTip`, a round hole of
+ * the slot's radius centred on the tool's narrower end). `slotFrac`
  * is clamped to SLOT_FRAC_RANGE; if the slot line still misses the outline there is no slot. */
 export function makePocket(m: ManifoldToplevel, P: Ring, p: PocketParams): Pocket {
   const { CrossSection } = m;
@@ -138,7 +165,13 @@ export function makePocket(m: ManifoldToplevel, P: Ring, p: PocketParams): Pocke
     const tool = largestPart(scope.keep(new CrossSection([P], 'NonZero')), scope);
     let clr = largestPart(
       scope.keep(tool.offset(Math.max(0, p.clearance), 'Round', 2, CIRCULAR_SEGMENTS)), scope);
-    if (p.slotOn && p.slotR > 0) {
+    if (p.slotOn && p.slotR > 0 && p.slotTip) {
+      const at = tipPoint(tool.toPolygons(), !!p.slotFlip);
+      if (at) {
+        const hole = scope.keep(scope.keep(CrossSection.circle(p.slotR, CIRCULAR_SEGMENTS)).translate(at[0], at[1]));
+        clr = largestPart(scope.keep(clr.add(hole)), scope);
+      }
+    } else if (p.slotOn && p.slotR > 0) {
       const frac = Math.min(Math.max(p.slotFrac, SLOT_FRAC_RANGE[0]), SLOT_FRAC_RANGE[1]);
       const b = clr.bounds();
       const yy = b.min[1] + frac * (b.max[1] - b.min[1]);
@@ -146,7 +179,10 @@ export function makePocket(m: ManifoldToplevel, P: Ring, p: PocketParams): Pocke
       if (xs) {
         const end = (x: number) =>
           scope.keep(scope.keep(CrossSection.circle(p.slotR, CIRCULAR_SEGMENTS)).translate(x, yy));
-        const pill = scope.keep(CrossSection.hull([end(xs[0] - p.slotOver), end(xs[1] + p.slotOver)]));
+        // full length runs slotOver past both sides; shorter, it shrinks about the middle, to a circle at 0
+        const span = Math.min(1, Math.max(0, p.slotSpan ?? 1));
+        const mid = (xs[0] + xs[1]) / 2, half = ((xs[1] - xs[0]) / 2 + p.slotOver) * span;
+        const pill = scope.keep(CrossSection.hull([end(mid - half), end(mid + half)]));
         clr = largestPart(scope.keep(clr.add(pill)), scope);
       }
     }

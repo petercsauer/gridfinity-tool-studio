@@ -46,8 +46,11 @@ above. Drag a part to move it, or its round handle to turn it; the part's axis s
 or Option to turn freely). With the canvas or the part list focused, arrow keys move the selected part (Shift
 for 10 mm), `[` and `]` turn it 90°, D or Delete hides it (restore it under Hidden parts), and Cmd/Ctrl+Z undoes.
 Select a part (in the Layout pane, its part list or the Trace pane) and Symmetric tool, Clearance, Rotation,
-Depth and the finger slot apply to it alone; with none selected they apply to all of them.
-The bin grows to fit the parts, or turn off **Auto size** to fix its size in cells. Overlapping pockets merge
+Depth and the finger slot apply to it alone; with none selected they apply to all of them. The finger slot's
+**Length** shortens it about the middle down to a round hole, and **At tip** puts a round hole at the part's
+narrower end instead (an antenna's tip; **Other end** moves it to the other one).
+**Arrange** packs the parts into the fewest grid cells, each upright or on its side and far enough apart that
+no wall is flagged (one undo step). The bin grows to fit the parts, or turn off **Auto size** to fix its size in cells. Overlapping pockets merge
 and walls thinner than 1.2 mm are flagged, but neither stops the build. The arrangement is saved with the upload.
 
 ## Fixing an outline

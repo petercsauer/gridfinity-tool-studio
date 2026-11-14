@@ -37,6 +37,10 @@ export interface PartSettings {
   slotR: number;
   slotOver: number;
   slotFrac: number;
+  /** Share of the slot's length cut (1, the default, for all of it; 0 for a round hole). */
+  slotSpan?: number;
+  slotTip?: boolean;
+  slotFlip?: boolean;
   depth: number;
 }
 
@@ -66,7 +70,7 @@ export const AXIS_SCORE = 0.8;
 export function settingsFromParams(p: Params): PartSettings {
   return {
     sym: p.sym, clearance: p.clearance, slotOn: p.slotOn, slotR: p.slotR, slotOver: p.slotOver,
-    slotFrac: p.slotFrac, depth: p.depth,
+    slotFrac: p.slotFrac, depth: p.depth, ...(p.slotSpan < 1 ? { slotSpan: p.slotSpan } : {}), ...(p.slotTip ? { slotTip: true } : {}), ...(p.slotFlip ? { slotFlip: true } : {}),
   };
 }
 
@@ -113,13 +117,14 @@ const finite = (v: unknown, fallback: number) => (Number.isFinite(Number(v)) ? N
 /** A placement with its settings clamped like the inspector's (see clampParams), a finite position and its
  * angle folded into (-180, 180]. */
 export function clampPlacement(pl: Placement, params: Params): Placement {
-  const c = clampParams({ ...params, ...pl, rot: 0 });
+  const c = clampParams({ ...params, ...pl, rot: 0, slotSpan: pl.slotSpan ?? 1 });
   return {
     part: String(pl.part),
     x: clamp(finite(pl.x, 0), -1000, 1000),
     y: clamp(finite(pl.y, 0), -1000, 1000),
     rot: normalizeDeg(finite(pl.rot, 0)),
-    ...settingsFromParams(c),
+    // a placement without slotTip or slotFlip (made before they existed) has the slot across, whatever the inspector shows
+    ...settingsFromParams({ ...c, slotTip: !!pl.slotTip, slotFlip: !!pl.slotFlip }),
     ...(pl.hidden ? { hidden: true } : {}),
     ...(cleanPath(pl.path) ? { path: cleanPath(pl.path)! } : {}),
   };

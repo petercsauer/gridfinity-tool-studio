@@ -13,6 +13,11 @@ export interface Params {
   slotR: number;
   slotOver: number;
   slotFrac: number;
+  /** Share of the slot's full length that is cut, 1 down to 0 (a round hole). */
+  slotSpan: number;
+  /** A round finger hole at the part's tip instead of a slot across it, and at its other end. */
+  slotTip: boolean;
+  slotFlip: boolean;
   u: number;
   depth: number;
   fillet: number;
@@ -31,7 +36,7 @@ type NumericKey = { [K in keyof Params]: Params[K] extends number ? K : never }[
 
 export const DEFAULTS: Params = {
   tool: 'groovejoint', sym: false, clearance: 2.5, rot: 0, slotOn: true, slotR: 12.5, slotOver: 6,
-  slotFrac: 0.4, u: 3, depth: 10, fillet: 3.175, bfillet: 0, holes: 'none', holesCorners: false, lip: true,
+  slotFrac: 0.4, slotSpan: 1, slotTip: false, slotFlip: false, u: 3, depth: 10, fillet: 3.175, bfillet: 0, holes: 'none', holesCorners: false, lip: true,
   halfGrid: false,
 };
 
@@ -42,6 +47,7 @@ export const RANGES: Record<NumericKey, readonly [number, number]> = {
   slotR: [4, 20],
   slotOver: [0, 20],
   slotFrac: [0, 1],
+  slotSpan: [0, 1],
   u: [1, 8], // keep in sync with the depth range below
   depth: [0, maxDepth(8, { lip: false })], // the Depth slider is capped further per height (maxDepth(u, options))
   fillet: [0, 6],
@@ -60,7 +66,7 @@ export function clamp(v: number, lo: number, hi: number): number {
  * (or a missing option, from an older caller) replaced by the default. */
 export function clampParams(p: Params): Params {
   const out: Params = {
-    ...p, tool: String(p.tool), sym: !!p.sym, slotOn: !!p.slotOn,
+    ...p, tool: String(p.tool), sym: !!p.sym, slotOn: !!p.slotOn, slotTip: !!p.slotTip, slotFlip: !!p.slotFlip,
     holes: HOLE_STYLES.includes(p.holes) ? p.holes : DEFAULTS.holes,
     holesCorners: !!p.holesCorners,
     lip: p.lip === undefined ? DEFAULTS.lip : !!p.lip,

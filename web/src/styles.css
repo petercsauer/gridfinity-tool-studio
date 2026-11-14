@@ -325,6 +325,9 @@ section.view.outline{background:var(--bg-canvas)}
 .outline-bar .layout-status{padding:4px 10px;border-radius:var(--r-capsule);background:var(--bg-field)}
 .outline-bar .layout-status:empty{display:none}
 .outline-bar .btn-pair{pointer-events:auto}
+.btn.mini{height:24px;padding:0 9px;font:var(--t-footnote);font-weight:600;margin-left:6px;flex:none}
+.btn.mini[aria-pressed=true]{background:var(--bg-field);box-shadow:var(--shadow-pill)}
+.layout-bar .btn.arrange{pointer-events:auto;height:28px;font:var(--t-subhead);flex:none}
 .outline-bar .btn{height:28px;font:var(--t-subhead)}
 .outline-round{display:flex;align-items:center;gap:4px;font:var(--t-subhead);color:var(--label-2)}
 .outline-round input{width:52px;height:28px;border:0;border-radius:var(--r-control);background:var(--bg-field);color:var(--label);
