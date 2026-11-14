@@ -21,7 +21,7 @@ const SHEET_PX = 4;
 /** Fewest foreground pixels that count as a part: 8 mm x 8 mm. */
 const MIN_TOOL_PX = (8 * PX) ** 2;
 /** Blobs smaller than this share of the largest are specks or shadows, not parts. */
-const MIN_PART_SHARE = 0.02;
+const MIN_PART_SHARE = 0.01;
 /** Most parts one photo can hold. */
 export const MAX_PARTS = 12;
 /** The paper in sheet mm, Letter or A4 (the markers sit the same on both): a part's centre lies on it. */
@@ -169,6 +169,45 @@ async function findSheet(img: RGBAImage): Promise<Homography> {
   }
 }
 
+/** A part found in a segmented region, with what tracing it needs. */
+interface Traced extends FoundPart {
+  /** The region (sheet mm) the mask covers, the mask and which of its pixels came from the photo. */
+  region: Box;
+  mask: Mask;
+  valid: Uint8Array;
+  /** Area centroid in sheet mm, and bounding-box area in mask px (to pick the biggest). */
+  centreMm: Vec2;
+  area: number;
+}
+
+/** Segment `region` of the sheet and find the parts in it (the caller deletes their contours). */
+async function traceRegion(cv: CV, image: RGBAImage, H: Homography, region: Box, env: UploadEnv): Promise<Traced[]> {
+  const { canvas, valid } = await rectRegion(image, H, region, PX);
+  const mask = await env.segment(canvas);
+  return findParts(cv, mask, [region[0], region[1]]).map((f) => ({
+    ...f, region, mask, valid,
+    centreMm: [region[0] + f.centre[0] / PX, region[1] + f.centre[1] / PX],
+    area: f.box[2] * f.box[3],
+  }));
+}
+
+/** A traced part's bounding box in sheet mm. */
+const boxMm = ({ region: [rx, ry], box: [x, y, w, h] }: Traced): Box => [rx + x / PX, ry + y / PX, rx + (x + w) / PX, ry + (y + h) / PX];
+
+/** Whether the sheet-mm point `p` is on (or within 1 mm of) traced part `t`'s outline: its contour, not its box,
+ * which can hold a small part beside a diagonal one. */
+function onPart(cv: CV, t: Traced, p: Vec2): boolean {
+  const at = new cv.Point((p[0] - t.region[0]) * PX, (p[1] - t.region[1]) * PX);
+  return cv.pointPolygonTest(t.contour, at, true) >= -PX;
+}
+
+/** Area (mm²) of a sheet-mm box, and of two boxes' overlap. */
+const boxArea = ([x0, y0, x1, y1]: Box) => Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+const overlapArea = (a: Box, b: Box) => boxArea([Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])]);
+
+/** Whether `p` lies in `box` grown by `pad` mm. */
+const inBox = ([x, y]: Vec2, [x0, y0, x1, y1]: Box, pad: number) => x >= x0 - pad && x <= x1 + pad && y >= y0 - pad && y <= y1 + pad;
+
 const label = (name: string) => name.trim().slice(0, 40) || 'Upload';
 
 /** Trace a calibration-sheet photo (RGBA, long side at most MAX_SIDE) into a new kit with one part per object
@@ -186,46 +225,78 @@ export async function upload(image: RGBAImage, name: string, { manifold }: Deps,
   const first = findParts(cv, await env.segment((await rectRegion(image, H, R1, PX)).canvas), [R1[0], R1[1]]);
   for (const f of first) f.contour.delete();
   if (!first.length) throw new PipelineError('no-tool', NO_TOOL);
-  /** Pass-1 parts' boxes in sheet mm, grown 3 mm: only pass-2 blobs centred in one are parts (the tighter crop
-   * can cut clutter beside the paper down to a sliver whose centre is on it). */
-  const seen = first.map(({ box: [x, y, w, h] }): Box => [R1[0] + x / PX - 3, R1[1] + y / PX - 3, R1[0] + (x + w) / PX + 3, R1[1] + (y + h) / PX + 3]);
-  const x0 = Math.min(...first.map((f) => f.box[0]));
-  const y0 = Math.min(...first.map((f) => f.box[1]));
-  const x1 = Math.max(...first.map((f) => f.box[0] + f.box[2]));
-  const y1 = Math.max(...first.map((f) => f.box[1] + f.box[3]));
+  /** Pass-1 parts' boxes in sheet mm. */
+  const seen = first.map(({ box: [x, y, w, h] }): Box => [R1[0] + x / PX, R1[1] + y / PX, R1[0] + (x + w) / PX, R1[1] + (y + h) / PX]);
 
-  // pass 2: all the parts plus 15 mm, for precise edges; the parts found here are the ones traced
-  const R2: Box = [R1[0] + x0 / PX - 15, R1[1] + y0 / PX - 15, R1[0] + x1 / PX + 15, R1[1] + y1 / PX + 15];
-  const { canvas, valid } = await rectRegion(image, H, R2, PX);
-  const mask = await env.segment(canvas);
-  const all = findParts(cv, mask, [R2[0], R2[1]]);
-  const inSeen = (f: FoundPart) => {
-    const [sx, sy] = [R2[0] + f.centre[0] / PX, R2[1] + f.centre[1] / PX];
-    return seen.some(([a, b, c, d]) => sx >= a && sx <= c && sy >= b && sy <= d);
-  };
-  const found = all.filter(inSeen);
-  for (const f of all) if (!found.includes(f)) f.contour.delete();
+  // pass 2: all the parts plus 15 mm, for precise edges
+  const R2: Box = [
+    Math.min(...seen.map((b) => b[0])) - 15, Math.min(...seen.map((b) => b[1])) - 15,
+    Math.max(...seen.map((b) => b[2])) + 15, Math.max(...seen.map((b) => b[3])) + 15,
+  ];
+  const traced: Traced[] = [];
   const parts: Part[] = [];
   const onSheet: Point[][] = [];
   try {
-    if (!found.length) throw new PipelineError('no-tool', NO_TOOL);
-    const row = (f: FoundPart) => Math.floor((R2[1] + f.centre[1] / PX) / ROW_MM);
-    found.sort((p, q) => row(p) - row(q) || p.centre[0] - q.centre[0]);
-    const fill = (f: FoundPart) => filledPart(cv, f.contour, mask.width, mask.height);
-    found.forEach((f, i) => {
-      const filled = fill(f);
+    // only blobs centred in a pass-1 part (grown 3 mm) are parts: the tighter crop can cut clutter beside the
+    // paper down to a sliver whose centre is on it
+    for (const t of await traceRegion(cv, image, H, R2, env)) {
+      if (seen.some((b) => inBox(t.centreMm, b, 3))) traced.push(t);
+      else t.contour.delete();
+    }
+    // the model can drop a small part from a crop holding a larger one (an antenna beside its analyser): each
+    // pass-1 part no pass-2 part lies in is segmented again in its own crop
+    for (const b of seen) {
+      // already traced: a pass-2 part lies in it, or it is a piece of one (its middle is on a traced part)
+      const mid: Vec2 = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+      if (traced.some((t) => inBox(t.centreMm, b, 2) || onPart(cv, t, mid))) continue;
+      // pass 1 may have seen only some of the part, so the crop grows around what is found until the part
+      // stays clear of its edges
+      // (up to the whole page plus its margin, R1)
+      const clip = (r: Box): Box => [Math.max(R1[0], r[0]), Math.max(R1[1], r[1]), Math.min(R1[2], r[2]), Math.min(R1[3], r[3])];
+      let region = clip([b[0] - 15, b[1] - 15, b[2] + 15, b[3] + 15]);
+      let keep: Traced | null = null;
+      /** What this part is known to cover: its pass-1 box, then the blob kept from the last crop. */
+      let ref: Box = b;
+      for (let tries = 0; tries < 12; tries++) {
+        keep?.contour.delete();
+        const own = await traceRegion(cv, image, H, region, env);
+        // this part: the blob overlapping most of `ref` (or of itself, the smaller), never one that is (a piece of)
+        // a part already traced, such as a slice of a large neighbour the crop clipped
+        const known = (t: Traced) => traced.some((u) => onPart(cv, u, t.centreMm));
+        const share = (t: Traced) => overlapArea(boxMm(t), ref) / Math.max(1e-9, Math.min(boxArea(boxMm(t)), boxArea(ref)));
+        const mine = own.filter((t) => !known(t) && (inBox(t.centreMm, ref, 2) || share(t) >= 0.5));
+        keep = mine.length ? mine.reduce((p, q) => (overlapArea(boxMm(q), ref) > overlapArea(boxMm(p), ref) ? q : p)) : null;
+        for (const t of own) if (t !== keep) t.contour.delete();
+        if (!keep) break;
+        const k = boxMm(keep);
+        ref = k;
+        const clear = (edge: number, at: number, limit: number) => Math.abs(edge - at) > 3 || Math.abs(at - limit) < 1e-6;
+        if (clear(k[0], region[0], R1[0]) && clear(k[1], region[1], R1[1]) && clear(k[2], region[2], R1[2]) && clear(k[3], region[3], R1[3])) break;
+        const next = clip([k[0] - 15, k[1] - 15, k[2] + 15, k[3] + 15]);
+        if (next.every((v, j) => Math.abs(v - region[j]!) < 1e-6)) break;
+        region = next;
+      }
+      if (keep) traced.push(keep);
+    }
+    if (!traced.length) throw new PipelineError('no-tool', NO_TOOL);
+    if (traced.length > MAX_PARTS) throw new PipelineError('too-many-parts', tooMany(traced.length));
+    const row = (t: Traced) => Math.floor(t.centreMm[1] / ROW_MM);
+    traced.sort((p, q) => row(p) - row(q) || p.centreMm[0] - q.centreMm[0]);
+    const fill = (t: Traced) => filledPart(cv, t.contour, t.mask.width, t.mask.height);
+    traced.forEach((t, i) => {
+      const filled = fill(t);
       try {
-        if (cutOff(cv, filled, valid)) throw new PipelineError('cut-off', found.length > 1 ? cutOffPart(i + 1) : CUT_OFF);
+        if (cutOff(cv, filled, t.valid)) throw new PipelineError('cut-off', traced.length > 1 ? cutOffPart(i + 1) : CUT_OFF);
       } finally {
         filled.delete();
       }
     });
-    for (const [i, f] of found.entries()) {
+    for (const [i, t] of traced.entries()) {
       // each part is traced from a mask holding only that part
-      const filled = fill(f);
+      const filled = fill(t);
       const data = new Uint8Array(filled.data as Uint8Array);
       filled.delete();
-      const up = await outlineFromMask({ width: mask.width, height: mask.height, data }, [R2[0], R2[1]] as Vec2, PX);
+      const up = await outlineFromMask({ width: t.mask.width, height: t.mask.height, data }, [t.region[0], t.region[1]] as Vec2, PX);
       const sym = symmetrize(manifold, up.outline);
       parts.push({
         id: `p${i + 1}`,
@@ -238,7 +309,7 @@ export async function upload(image: RGBAImage, name: string, { manifold }: Deps,
       onSheet.push(up.outline.map(([qx, qy]): Point => [a * qx + b * qy + c, d * qx + e * qy + g]));
     }
   } finally {
-    for (const f of found) f.contour.delete();
+    for (const t of traced) t.contour.delete();
   }
 
   const view = await renderSheetView(image, H, onSheet, SHEET_PX);

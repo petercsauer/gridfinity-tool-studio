@@ -84,6 +84,8 @@ interface Blob2D {
   c: Vec2;
   size: [number, number];
   deg: number;
+  /** Paint colour (RGBA), magenta by default. */
+  color?: readonly [number, number, number, number];
 }
 
 const MAGENTA = [255, 0, 255, 255] as const;
@@ -99,14 +101,14 @@ async function paintedSheet(blobs: readonly Blob2D[], reach: [number, number] = 
     for (let x = 0; x < image.width; x++) {
       const sx = box[0] + (x + 0.5) / px;
       const sy = box[1] + (y + 0.5) / px;
-      const hit = blobs.some(({ c, size: [w, h], deg }) => {
+      const hit = blobs.find(({ c, size: [w, h], deg }) => {
         const t = (deg * Math.PI) / 180;
         const dx = sx - c[0], dy = sy - c[1];
         const u = dx * Math.cos(t) + dy * Math.sin(t);
         const v = -dx * Math.sin(t) + dy * Math.cos(t);
         return Math.abs(u) <= w / 2 && Math.abs(v) <= h / 2;
       });
-      if (hit) out.set(MAGENTA, (y * image.width + x) * 4);
+      if (hit) out.set(hit.color ?? MAGENTA, (y * image.width + x) * 4);
     }
   }
   return { ...image, data: out };
@@ -177,6 +179,90 @@ describe('upload of a sheet with several parts', () => {
   it('rejects more than 12 parts', async () => {
     const grid = [60, 85, 110, 135, 160].flatMap((x) => [70, 100, 130].map((y): Blob2D => ({ c: [x, y], size: [15, 15], deg: 0 })));
     await rejects(upload(await paintedSheet(grid.slice(0, 13)), 'kit', deps, magentaEnv), 'too-many-parts', /13 parts/);
+  }, 120000);
+
+  it('segments a part again on its own when the model drops it from the crop of all parts', async () => {
+    // a 70 x 10 mm part painted half cyan, half yellow: pass 1 sees only its cyan half, pass 2 (one crop of all
+    // the parts) loses it, and only its own crop shows all of it, so its crop must grow to hold it
+    const CYAN = [0, 255, 255, 255] as const;
+    const YELLOW = [255, 255, 0, 255] as const;
+    const kit: Blob2D[] = [
+      { c: [85, 70], size: [35, 10], deg: 0, color: CYAN },
+      { c: [120, 70], size: [35, 10], deg: 0, color: YELLOW },
+      { c: [105, 150], size: [80, 40], deg: 0 },
+    ];
+    let call = 0;
+    const env: UploadEnv = {
+      ...magentaEnv,
+      segment: async ({ width, height, data }) => {
+        call++;
+        const m = new Uint8Array(width * height);
+        for (let i = 0; i < m.length; i++) {
+          const [r, g, b] = [data[i * 4]!, data[i * 4 + 1]!, data[i * 4 + 2]!];
+          const magenta = r > 200 && g < 100 && b > 200;
+          const cyan = r < 100 && g > 200 && b > 200;
+          // its own crop sees any paint, including the blend resampling leaves where cyan meets yellow
+          const paint = Math.max(r, g, b) - Math.min(r, g, b) > 100;
+          m[i] = magenta || (call === 1 && cyan) || (call > 2 && paint) ? 255 : 0;
+        }
+        return { width, height, data: m };
+      },
+    };
+    const r = await upload(await paintedSheet(kit), 'kit', deps, env);
+    expect(call).toBeGreaterThan(3);
+    await expectParts(r, [{ c: [102.5, 70], size: [70, 10], deg: 0 }, kit[2]!]);
+  }, 120000);
+
+  /** A model that sees magenta always, cyan in the whole-page pass (1), and all of this file's paint in a part's
+   * own crop (3 and on): what is cyan (or yellow) is lost in the crop of all the parts (2). */
+  const droppingEnv = (): UploadEnv & { calls: () => number } => {
+    let call = 0;
+    return {
+      ...magentaEnv,
+      calls: () => call,
+      segment: async ({ width, height, data }) => {
+        call++;
+        const m = new Uint8Array(width * height);
+        for (let i = 0; i < m.length; i++) {
+          const [r, g, b] = [data[i * 4]!, data[i * 4 + 1]!, data[i * 4 + 2]!];
+          const magenta = r > 200 && g < 100 && b > 200;
+          const cyan = r < 100 && g > 200 && b > 200;
+          // cyan, yellow and the green blend between them (not the real stripper's red handles)
+          const paint = Math.max(r, g, b) - Math.min(r, g, b) > 100 && g > 200;
+          m[i] = magenta || (call === 1 && cyan) || (call > 2 && paint) ? 255 : 0;
+        }
+        return { width, height, data: m };
+      },
+    };
+  };
+  const CYAN = [0, 255, 255, 255] as const;
+
+  it('keeps a dropped part, not a slice of a large neighbour, in the part\'s own crop', async () => {
+    // a thin antenna tilted beside a box's corner: their boxes overlap, their pixels don't
+    const kit: Blob2D[] = [{ c: [105, 150], size: [80, 80], deg: 0 }, { c: [147.5, 95], size: [2.5, 60], deg: -3, color: CYAN }];
+    const env = droppingEnv();
+    const r = await upload(await paintedSheet(kit), 'kit', deps, env);
+    expect(env.calls()).toBeGreaterThan(2);
+    await expectParts(r, [kit[1]!, kit[0]!]);
+  }, 120000);
+
+  it('grows a dropped part\'s crop until it holds all of a long part', async () => {
+    // 150 mm long, of which pass 1 sees the first 30 mm (cyan) and its own crops all
+    const YELLOW = [255, 255, 0, 255] as const;
+    const kit: Blob2D[] = [
+      { c: [45, 205], size: [30, 10], deg: 0, color: CYAN },
+      { c: [120, 205], size: [120, 10], deg: 0, color: YELLOW },
+      { c: [105, 120], size: [60, 40], deg: 0 },
+    ];
+    const r = await upload(await paintedSheet(kit), 'kit', deps, droppingEnv());
+    expect(r.parts).toHaveLength(2);
+    // the whole 150 mm, not the 30 mm pass 1 saw (to a millimetre: this test's model takes the paint's blend into
+    // the paper at both ends as paint)
+    const [short, long] = await rectDims(r.parts[1]!.outline);
+    expect(Math.abs(long - 150)).toBeLessThanOrEqual(1.25);
+    expect(Math.abs(short - 10)).toBeLessThanOrEqual(0.75);
+    const [c] = apply(r.parts[1]!.up2sheet, [await rectCentre(r.parts[1]!.outline)]);
+    expect(Math.hypot(c![0] - 105, c![1] - 205)).toBeLessThanOrEqual(1);
   }, 120000);
 
   it('ignores clutter on the table beside the paper, even where the tighter crop cuts it to a sliver', async () => {
