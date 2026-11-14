@@ -1,6 +1,7 @@
 // Uploaded kits, kept in this browser's IndexedDB (idb-keyval) so they survive a reload, with their layout.
 // At most MAX_UPLOADS are kept; saving one more drops the least recently used. Entries from an older schema
-// are migrated on load (migrate); entries that can't be are dropped one by one.
+// (and the single-tool version's database) are migrated on load (migrate); entries that can't be are dropped
+// one by one.
 import { createStore, del, entries, get, set, type UseStore } from 'idb-keyval';
 import type { Layout, Part } from './kit';
 import { centroid } from './vision/symmetry';
@@ -19,8 +20,19 @@ export interface StoredUpload extends UploadResult {
   layout?: Layout;
 }
 
+/** Kits live in a database of their own. The single-tool version's uploads (schema 1, in the old database) are
+ * copied over and left where they are: that version deletes any record it doesn't know, so an old tab still open
+ * would otherwise wipe the kits. */
 let db: UseStore | null = null;
-const store = () => (db ??= createStore('gridfinity-tool-studio', 'uploads'));
+let legacyDb: UseStore | null = null;
+const store = () => (db ??= createStore('gridfinity-tool-studio-kits', 'uploads'));
+const legacy = () => (legacyDb ??= createStore('gridfinity-tool-studio', 'uploads'));
+
+/** Delete an upload from both databases (so a removed upload isn't copied over again). */
+async function delBoth(id: string): Promise<void> {
+  await del(id, store());
+  await del(id, legacy()).catch(() => {});
+}
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object';
@@ -86,10 +98,23 @@ function serial<T>(id: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** All stored uploads, oldest first. Older entries are migrated and written back; ones that can't be are
- * deleted. Each entry is handled on its own, so one bad entry costs only itself. */
+/** All stored uploads, oldest first. Uploads in the old database not yet copied are copied; older entries are
+ * migrated and written back; ones that can't be are deleted. Each entry is handled on its own, so one bad entry
+ * costs only itself. */
 export async function loadUploads(): Promise<StoredUpload[]> {
   const all = await entries<string, unknown>(store());
+  const have = new Set(all.map(([k]) => k));
+  try {
+    for (const [key, v] of await entries<string, unknown>(legacy())) {
+      if (have.has(key)) continue;
+      const u = migrate(v);
+      if (!u || u.id !== key) continue;
+      await serial(key, () => set(key, u, store()));
+      all.push([key, u]);
+    }
+  } catch {
+    // no old database, or it can't be read: nothing to copy
+  }
   const out: StoredUpload[] = [];
   for (const [key, v] of all) {
     try {
@@ -115,7 +140,7 @@ export function overflow(uploads: Pick<StoredUpload, 'id' | 'used'>[], max = MAX
 export async function saveUpload(u: UploadResult, now = Date.now()): Promise<string[]> {
   await serial(u.id, () => set(u.id, { ...u, schema: SCHEMA, created: now, used: now } satisfies StoredUpload, store()));
   const evict = overflow(await loadUploads());
-  for (const id of evict) await serial(id, () => del(id, store()));
+  for (const id of evict) await serial(id, () => delBoth(id));
   return evict;
 }
 
@@ -138,5 +163,5 @@ export function saveLayout(id: string, layout: Layout): Promise<void> {
 }
 
 export async function removeUpload(id: string): Promise<void> {
-  await serial(id, () => del(id, store()));
+  await serial(id, () => delBoth(id));
 }
