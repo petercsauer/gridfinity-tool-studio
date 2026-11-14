@@ -36,6 +36,11 @@ heic-to (https://github.com/hoppergee/heic-to)
 idb-keyval (https://github.com/jakearchibald/idb-keyval)
   Apache License 2.0, Copyright 2016 Jake Archibald.
 
+Paper.js PathFitter (https://github.com/paperjs/paper.js, src/path/PathFitter.js)
+  Adapted to TypeScript in web/src/path/fit.ts (Philip J. Schneider's curve
+  fitting from Graphics Gems, 1990, with Jürg Lehni's changes).
+  MIT License, Copyright (c) 2011 - 2020, Jürg Lehni & Jonathan Puckey.
+
 Development-only tools (not shipped in the site): Vite, Vitest, TypeScript,
 Playwright and their dependencies, under their own licenses.
 
