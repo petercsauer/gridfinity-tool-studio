@@ -149,8 +149,9 @@ export interface LayoutKit {
 }
 
 export interface LayoutHooks {
-  /** A committed edit (drag released, key, undo). */
-  change(layout: Layout): void;
+  /** A committed edit (drag released, key, undo) to the layout of the kit `id` (the one shown, which can still be
+   * the previous tool for a moment after the menu changes). */
+  change(layout: Layout, id: string): void;
   /** The bin's size while a drag is under way, before the worker has seen it. */
   live(f: { nx: number; ny: number; w: number; h: number }): void;
   /** The selected part changed (null: none). */
@@ -279,7 +280,7 @@ export class LayoutView {
     if (this.past.length > HISTORY) this.past.shift();
     this.future = [];
     this.layout = next;
-    this.hooks.change(next);
+    this.hooks.change(next, this.kit!.id);
     this.syncList();
     this.draw();
   }
@@ -292,7 +293,7 @@ export class LayoutView {
     to.push(this.layout);
     this.layout = l;
     if (this.selected && !this.visible().some((pl) => pl.part === this.selected)) this.selected = null;
-    this.hooks.change(l);
+    this.hooks.change(l, this.kit!.id);
     this.syncList();
     this.draw();
     this.say(`${redo ? 'Redone' : 'Undone'}.${this.selected ? ' ' + this.describe(this.selected) : ''}`);
@@ -434,6 +435,8 @@ export class LayoutView {
       d.snapped = s.snapped;
       pl = turnAbout(pl0, d.pivotPart, normalizeDeg(s.rot));
     }
+    // a click that barely moves isn't a move (no undo step, save or rebuild)
+    if (!d.moved && Math.hypot(at[0] - d.from[0], at[1] - d.from[1]) * this.xf.s / this.xf.dpr < 3) return;
     d.moved = true;
     this.layout = { ...d.start, placements: d.start.placements.map((q) => (q.part === d.part ? pl : q)) };
     this.close = this.tooCloseTo(d.part);

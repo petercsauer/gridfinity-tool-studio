@@ -106,13 +106,25 @@ let lastOutlineTool = '';
 let lastDepths: { tool: string; depths: number[] } | null = null;
 /** Uploads remember their layout; saved 500 ms after the last change to it. */
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingSaves = new Map<string, Layout>();
 function queueSave(id: string, layout: Layout): void {
   clearTimeout(saveTimers.get(id));
-  saveTimers.set(id, setTimeout(() => {
-    saveTimers.delete(id);
-    void saveLayout(id, layout).catch(() => {});
-  }, 500));
+  pendingSaves.set(id, layout);
+  saveTimers.set(id, setTimeout(() => flushSave(id), 500));
 }
+function flushSave(id: string): void {
+  clearTimeout(saveTimers.get(id));
+  saveTimers.delete(id);
+  const l = pendingSaves.get(id);
+  pendingSaves.delete(id);
+  if (l) void saveLayout(id, l).catch(() => {});
+}
+// the last half second of changes isn't lost when the page is hidden or closed
+const flushSaves = () => [...pendingSaves.keys()].forEach(flushSave);
+addEventListener('pagehide', flushSaves);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushSaves();
+});
 function setLayout(id: string, layout: Layout): void {
   layouts.set(id, layout);
   if (isUpload(id)) queueSave(id, layout);
@@ -155,9 +167,9 @@ function endGesture(): void {
   if (start && l && l !== start) layoutView.apply(l, start);
 }
 const layoutView = new LayoutView($<HTMLCanvasElement>('plan'), $('partList'), $('layoutStatus'), $('layoutWarnings'), {
-  change(layout) {
+  change(layout, id) {
     gestureStart = null;
-    setLayout(toolMenu.value, layout);
+    setLayout(id, layout);
     syncInspector();
     changed();
   },
@@ -691,6 +703,30 @@ function showSwitch(id: string, values: boolean[]): void {
 const PER_PART = ['sym', 'clearance', 'slotOn', 'slotD', 'slotFrac', 'depth', 'rot'];
 /** The inspector for the current tool and selection: what the per-part controls edit and their values, the
  * bin size, the hidden parts, and the selected (or only) part's pocket size and symmetry note. */
+/** The per-part controls (Rotation aside, which always shows its part's angle), and how each shows its value. */
+const OWN: Record<string, ((v: number) => string) | null> = {
+  sym: null, slotOn: null,
+  clearance: trim, slotD: String, slotFrac: (v) => String(Math.round(v * 100)), depth: trim,
+};
+/** The inspector's own per-part values, as last shown (kept while the controls show a laid-out tool's parts,
+ * which an edit can start before the next sync), and whether they show such a tool's parts now. */
+let ownControls: Map<string, string | boolean> | null = null;
+let showingLayout = false;
+function snapshotControls(): Map<string, string | boolean> {
+  return new Map(Object.keys(OWN).map((id) => [id, OWN[id] ? input(id).value : input(id).checked]));
+}
+function restoreControls(saved: Map<string, string | boolean>): void {
+  for (const [id, v] of saved) {
+    const el = input(id);
+    const fmt = OWN[id];
+    if (fmt) {
+      el.value = String(v);
+      $(id + 'V').textContent = fmt(+el.value);
+      syncP(el);
+    } else el.checked = v as boolean;
+  }
+  syncDepth();
+}
 function syncInspector(): void {
   const l = currentLayout();
   const r = outlineNow();
@@ -705,7 +741,15 @@ function syncInspector(): void {
   $('scopeClear').hidden = !sel;
   // the parts' own values once the user has a layout; until then they all have the inspector's
   for (const id of PER_PART) setMixed(input(id), false);
-  if (layouts.has(toolMenu.value) && inScope.length) {
+  // the controls show a laid-out tool's parts; the inspector's own values (what a tool without a layout of its
+  // own takes) are put aside meanwhile and back after, so a Mixed or unchecked state doesn't carry over
+  const ownLayout = layouts.has(toolMenu.value) && inScope.length > 0;
+  if (!ownLayout) {
+    if (showingLayout && ownControls) restoreControls(ownControls);
+    ownControls = snapshotControls();
+  }
+  showingLayout = ownLayout;
+  if (ownLayout) {
     showSwitch('sym', inScope.map((pl) => pl.sym));
     showRange('clearance', inScope.map((pl) => pl.clearance), trim);
     showSwitch('slotOn', inScope.map((pl) => pl.slotOn));
