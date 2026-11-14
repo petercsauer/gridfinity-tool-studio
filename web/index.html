@@ -31,6 +31,7 @@
     <div class="pane-switch glass" role="tablist" aria-label="Flat view">
       <button role="tab" id="tabLayout" aria-controls="layoutPane" aria-selected="false" tabindex="-1">Layout</button>
       <button role="tab" id="tabTrace" aria-controls="tracePane" aria-selected="true">Trace</button>
+      <button role="tab" id="tabOutline" aria-controls="outlinePane" aria-selected="false" tabindex="-1">Outline</button>
     </div>
     <section class="view layout" id="layoutPane" role="tabpanel" aria-labelledby="tabLayout" hidden>
       <canvas id="plan" tabindex="0" aria-label="Bin layout" aria-describedby="layoutKeys"></canvas>
@@ -40,6 +41,29 @@
         <div class="layout-status num" id="layoutStatus" role="status" aria-live="polite">Drag a part to move it, or its handle to turn it.</div>
       </div>
       <p id="layoutKeys" hidden>Tab picks a part. Arrow keys move it 1 mm, with Shift 10 mm. [ and ] turn it 90°. Delete hides it, until it is restored under Hidden parts. Escape clears the selection. Command or Control Z undoes.</p>
+    </section>
+    <section class="view outline" id="outlinePane" role="tabpanel" aria-labelledby="tabOutline" hidden>
+      <canvas id="outlineCanvas" tabindex="0" aria-label="Part outline" aria-describedby="outlineKeys"></canvas>
+      <div class="outline-top">
+        <ul class="part-list" id="outlineParts" role="listbox" aria-label="Part to edit"></ul>
+        <label class="outline-detail">Detail
+          <input type="range" id="outlineDetail" min="0.1" max="1" step="0.05" value="0.3" aria-describedby="outlineDetailNote">
+          <span class="num" id="outlineDetailV">0.30 mm</span>
+        </label>
+        <span class="num outline-count" id="outlineCount"></span>
+      </div>
+      <p id="outlineDetailNote" hidden>How far the outline may stray from the trace. Larger means fewer points.</p>
+      <div class="layout-bar outline-bar">
+        <div class="btn-pair">
+          <button class="btn" id="outlineKind" disabled>Make corner</button>
+          <button class="btn" id="outlineStraight" disabled>Straighten</button>
+          <button class="btn" id="outlineRemove" disabled>Delete point</button>
+          <span class="outline-round"><button class="btn" id="outlineRound" disabled>Round corner</button><input type="number" id="outlineRadius" min="0.5" max="20" step="0.5" value="2" aria-label="Corner radius in mm"><span>mm</span></span>
+          <button class="btn" id="outlineReset" disabled>Reset to trace</button>
+        </div>
+        <div class="layout-status" id="outlineStatus" role="status" aria-live="polite">Drag a point, a handle or the outline. Double-click to add a point or switch corner and smooth.</div>
+      </div>
+      <p id="outlineKeys" hidden>Tab steps through the points. Arrow keys move a point 0.1 mm, with Shift 1 mm. C switches it between corner and smooth, S straightens the segment after it, R rounds a corner to the radius beside Round corner, Delete removes it. Command or Control Z undoes. Hold Option or Alt while dragging to stop straight edges snapping level, or to break a smooth point's handles apart.</p>
     </section>
     <section class="view trace" id="tracePane" role="tabpanel" aria-labelledby="tabTrace">
       <canvas id="flat"></canvas>

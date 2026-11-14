@@ -50,6 +50,19 @@ Depth and the finger slot apply to it alone; with none selected they apply to al
 The bin grows to fit the parts, or turn off **Auto size** to fix its size in cells. Overlapping pockets merge
 and walls thinner than 1.2 mm are flagged, but neither stops the build. The arrangement is saved with the upload.
 
+## Fixing an outline
+
+Straight edges the trace wobbles along (a box's sides) are made straight when a photo is traced. For anything
+else, the **Outline** pane shows the selected part's outline over its photo as a path of points: squares are
+corners, circles smooth. Drag a point, the outline itself (it bends through the cursor), or a selected point's
+handles; double-click a point to switch it between corner and smooth, or the outline to add a point. Delete
+removes a point and refits that stretch to the trace, **Straighten** (S) makes a segment straight, **Round
+corner** (R) rounds a corner to the radius beside it, and **Detail** refits the whole outline with fewer or more
+points. Hold Alt or Option while dragging to stop straight edges snapping level, or to break a smooth point's
+handles apart. An edit that would make the outline cross itself is undone when let go. The edited outline is
+used for the pocket and the exports, saved with the layout, and undone with Cmd/Ctrl+Z; **Reset to trace** goes
+back to the traced one (and lets Symmetric tool apply again).
+
 ## What you can tune
 
 | Setting | What it does |
@@ -99,7 +112,8 @@ The app in `web/` is a static site (Vite + TypeScript). The UI is `web/index.htm
 
 The Python package in `src/gts/` is the reference implementation the browser port was checked against; the
 JSON fixtures in `tests/fixtures/` pin the two to the same results. Base holes, the lip toggle, half-grid feet,
-kits (several parts in one photo) and the Layout pane exist only in the browser app.
+kits (several parts in one photo), the Layout pane, edge straightening and the Outline pane exist only in the
+browser app.
 
 ## Developing the web app
 

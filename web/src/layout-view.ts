@@ -284,6 +284,11 @@ export class LayoutView {
     this.draw();
   }
 
+  /** Undo (or redo) the last layout edit, wherever it was made. */
+  history(redo: boolean): void {
+    this.undo(redo);
+  }
+
   private undo(redo: boolean): void {
     const from = redo ? this.future : this.past;
     const to = redo ? this.past : this.future;

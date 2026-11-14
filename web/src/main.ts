@@ -12,6 +12,7 @@ import { count, uploadErrorEvent } from './count';
 import { writeStl } from './stl';
 import { traceDxf, traceSvg, type TraceLayers } from './trace-export';
 import { isDark, TraceView } from './trace';
+import { OutlineView } from './outline-view';
 import { decodePhoto } from './vision/decode';
 import { modelCached } from './vision/model';
 import { centroid } from './vision/symmetry';
@@ -169,11 +170,12 @@ const layoutView = new LayoutView($<HTMLCanvasElement>('plan'), $('partList'), $
   select(id) {
     trace.select(id);
     syncInspector();
+    syncOutline();
   },
 });
 
 // ---- the flat pane: Layout or Trace. Kits with several parts open in Layout, single tools in Trace.
-const tabs = { layout: $('tabLayout'), trace: $('tabTrace') };
+const tabs = { layout: $('tabLayout'), trace: $('tabTrace'), outline: $('tabOutline') };
 function showPane(name: keyof typeof tabs): void {
   for (const [k, tab] of Object.entries(tabs)) {
     const on = k === name;
@@ -182,18 +184,96 @@ function showPane(name: keyof typeof tabs): void {
     $(tab.getAttribute('aria-controls')!).hidden = !on;
   }
   if (name === 'layout') layoutView.draw();
-  else trace.draw();
+  else if (name === 'trace') trace.draw();
+  else {
+    // the outline is edited one part at a time: the selected one, else the first
+    const l = currentLayout();
+    if (!layoutView.selection && l) layoutView.select(l.placements.find((pl) => !pl.hidden)?.part ?? null);
+    syncOutline();
+  }
 }
+const tabOrder = Object.keys(tabs) as (keyof typeof tabs)[];
 for (const [k, tab] of Object.entries(tabs) as [keyof typeof tabs, HTMLElement][]) {
   tab.addEventListener('click', () => showPane(k));
   tab.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    const next = k === 'layout' ? 'trace' : 'layout';
+    const next = tabOrder[(tabOrder.indexOf(k) + (e.key === 'ArrowRight' ? 1 : tabOrder.length - 1)) % tabOrder.length]!;
     showPane(next);
     tabs[next].focus();
     e.preventDefault();
   });
 }
+
+// ---- the Outline pane: the selected part's outline, editable. An edit is the part's `path` in the layout, so
+// it is saved, undone and sent to the worker like any other layout change.
+const outlineParts = $('outlineParts');
+const outlineView = new OutlineView($<HTMLCanvasElement>('outlineCanvas'), {
+  detail: input('outlineDetail'), detailValue: $('outlineDetailV'), count: $('outlineCount'), status: $('outlineStatus'),
+  kind: $<HTMLButtonElement>('outlineKind'), straighten: $<HTMLButtonElement>('outlineStraight'),
+  remove: $<HTMLButtonElement>('outlineRemove'), reset: $<HTMLButtonElement>('outlineReset'),
+  round: $<HTMLButtonElement>('outlineRound'), radius: input('outlineRadius'),
+}, {
+  change(path) {
+    const l = currentLayout();
+    const id = outlinePart();
+    if (!l || !id) return;
+    const next = {
+      ...l,
+      placements: l.placements.map((pl) => {
+        if (pl.part !== id) return pl;
+        const { path: _old, ...rest } = pl;
+        return path ? { ...rest, path } : rest;
+      }),
+    };
+    layoutView.apply(next, l);
+  },
+  undo(redo) {
+    layoutView.history(redo);
+  },
+});
+/** The part the Outline pane edits: the selected one, else the first visible one. */
+function outlinePart(): string | null {
+  const l = currentLayout();
+  return layoutView.selection ?? l?.placements.find((pl) => !pl.hidden)?.part ?? null;
+}
+function syncOutline(): void {
+  const r = outlineNow();
+  const l = currentLayout();
+  const id = outlinePart();
+  const part = r?.parts.find((q) => q.id === id);
+  const pl = l?.placements.find((q) => q.part === id);
+  const vis = l?.placements.filter((q) => !q.hidden) ?? [];
+  const num = (pid: string) => (l?.placements.findIndex((q) => q.part === pid) ?? -1) + 1;
+  // the part chooser, for kits
+  outlineParts.hidden = vis.length < 2;
+  outlineParts.replaceChildren(...vis.map((q) => {
+    const li = document.createElement('li');
+    li.setAttribute('role', 'option');
+    li.dataset.part = q.part;
+    li.textContent = `Part ${num(q.part)}`;
+    li.setAttribute('aria-selected', String(q.part === id));
+    li.tabIndex = q.part === id ? 0 : -1;
+    return li;
+  }));
+  outlineView.show(r && part && pl && id ? {
+    tool: toolMenu.value, part, placement: pl, label: `Part ${num(id)}`, sheetImage: r.sheetImage, sheetBox: r.sheetBox,
+  } : null);
+}
+outlineParts.addEventListener('click', (e) => {
+  const li = (e.target as HTMLElement).closest<HTMLElement>('[role=option]');
+  if (li) layoutView.select(li.dataset.part!);
+});
+outlineParts.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const items = [...outlineParts.querySelectorAll<HTMLElement>('[role=option]')];
+  const i = items.findIndex((li) => li.getAttribute('aria-selected') === 'true');
+  const next = items[(i + (e.key === 'ArrowRight' ? 1 : items.length - 1)) % items.length];
+  if (next) {
+    layoutView.select(next.dataset.part!);
+    outlineParts.querySelector<HTMLElement>(`[data-part="${CSS.escape(next.dataset.part!)}"]`)?.focus();
+  }
+  e.preventDefault();
+});
 /** The tool the pane was last chosen for; the user's choice holds until the tool changes. */
 let paneTool = '';
 
@@ -569,6 +649,7 @@ async function refreshOutline(): Promise<void> {
   trace.select(layoutView.selection);
   trace.show(r);
   syncInspector();
+  syncOutline();
   if (paneTool !== p.tool) {
     paneTool = p.tool;
     showPane(r.parts.length > 1 ? 'layout' : 'trace');
@@ -713,6 +794,10 @@ function syncInspector(): void {
     showRange('slotFrac', inScope.map((pl) => pl.slotFrac), (v) => String(Math.round(v * 100)));
     showRange('depth', inScope.map((pl) => pl.depth), trim);
   }
+  // an edited outline replaces the traced one and its symmetric version
+  const edited = inScope.some((pl) => !!pl.path);
+  input('sym').disabled = edited;
+  input('sym').title = edited ? 'This outline was edited in the Outline pane; reset it there to use the symmetric outline.' : '';
   // rotation turns one part: the selected one, or a kit's only one
   const turnable = !!sel || vis.length === 1;
   input('rot').disabled = !turnable;
@@ -1011,6 +1096,7 @@ $('rmBtn').addEventListener('click', async () => {
 window.addEventListener('resize', () => {
   trace.draw();
   layoutView.draw();
+  outlineView.draw();
 });
 
 // ---- presentation listeners
@@ -1037,6 +1123,7 @@ window.addEventListener('themechange', () => {
   applyTheme3D();
   trace.draw();
   layoutView.draw();
+  outlineView.draw();
 });
 
 // ---- start

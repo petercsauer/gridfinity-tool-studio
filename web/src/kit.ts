@@ -4,6 +4,7 @@
 // a single tool always did.
 import { clamp, clampParams, type Params } from './params';
 import { rotate, type Ring, type Vec2 } from './geometry/pocket';
+import type { BezierPath } from './path/bezier';
 import type { Affine } from './vision/outline';
 
 /** A part's symmetric outline and its mirror axis (through `centre`, `axisDeg` from the y axis, shifted
@@ -47,6 +48,8 @@ export interface Placement extends PartSettings {
   y: number;
   rot: number;
   hidden?: boolean;
+  /** The part's outline as edited (part frame, mm); it replaces the traced one (and its symmetric version). */
+  path?: BezierPath;
 }
 
 export interface Layout {
@@ -118,7 +121,18 @@ export function clampPlacement(pl: Placement, params: Params): Placement {
     rot: normalizeDeg(finite(pl.rot, 0)),
     ...settingsFromParams(c),
     ...(pl.hidden ? { hidden: true } : {}),
+    ...(cleanPath(pl.path) ? { path: cleanPath(pl.path)! } : {}),
   };
+}
+
+const isVec = (v: unknown): v is Vec2 => Array.isArray(v) && v.length === 2 && v.every((x) => Number.isFinite(x));
+
+/** `v` if it is a usable edited outline (3 to 2000 anchors, finite numbers, known kinds), else null. */
+export function cleanPath(v: unknown): BezierPath | null {
+  const a = (v as BezierPath | undefined)?.anchors;
+  if (!Array.isArray(a) || a.length < 3 || a.length > 2000) return null;
+  const ok = a.every((x) => !!x && isVec(x.p) && isVec(x.hin) && isVec(x.hout) && (x.kind === 'corner' || x.kind === 'smooth'));
+  return ok ? { anchors: a.map((x) => ({ p: [x.p[0], x.p[1]], hin: [x.hin[0], x.hin[1]], hout: [x.hout[0], x.hout[1]], kind: x.kind })) } : null;
 }
 
 /** The placements of `layout` whose part is in the kit, clamped (hidden ones kept); the initial layout

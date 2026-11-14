@@ -69,16 +69,18 @@ export function grownRing(m: ManifoldToplevel, pocket: Ring, fillet: number): Ri
   }
 }
 
-function partTrace(m: ManifoldToplevel, fillet: number, { part, placement, tool, pocket }: PlacedPart): PartTrace {
+function partTrace(m: ManifoldToplevel, fillet: number, { part, placement, tool, pocket, traced, edited }: PlacedPart): PartTrace {
   const { symmetry: sy, up2sheet } = part;
-  const P0 = placement.sym ? sy.outline : part.outline;
+  const P0 = traced;
   return {
     id: part.id,
     tool,
     pocket,
+    traced,
+    edited,
     sheetTool: affine(tool, up2sheet),
     sheetPocket: affine(pocket, up2sheet),
-    ...(placement.sym
+    ...(placement.sym && !edited
       ? { sheetAxis: affine(axisSegment(P0, { deg: sy.axisDeg, offset: sy.offset, centre: sy.centre }), up2sheet) as [Vec2, Vec2] }
       : {}),
     symmetryScore: sy.score,
