@@ -101,17 +101,24 @@ export class OutlineView {
       this.image = img;
     }
     if (!this.drag) this.path = kit ? (kit.placement.path ?? this.fitted(key)) : null;
+    // an undo or redo can leave fewer points than the selection's index
+    const n = this.path?.anchors.length ?? 0;
+    if (this.selected && this.selected.i >= n) this.selected = null;
     this.sync();
     this.draw();
   }
 
-  /** The outline fitted to the trace at the slider's tolerance (cached per part and tolerance). */
+  /** The outline fitted to the trace at the slider's tolerance (cached per part, trace and tolerance: the trace
+   * changes with Symmetric). */
+  private fittedTrace: Ring | null = null;
   private fittedPath: BezierPath | null = null;
   private fitted(key: string): BezierPath {
     const k = `${key}@${this.tolerance}`;
-    if (k !== this.fittedFor || !this.fittedPath) {
-      this.fittedPath = refit(this.kit!.part.traced, this.tolerance);
+    const traced = this.kit!.part.traced;
+    if (k !== this.fittedFor || !this.fittedPath || traced !== this.fittedTrace) {
+      this.fittedPath = refit(traced, this.tolerance);
       this.fittedFor = k;
+      this.fittedTrace = traced;
     }
     return this.fittedPath;
   }
@@ -161,7 +168,6 @@ export class OutlineView {
     this.ui.reset.disabled = !this.kit?.placement.path;
     this.ui.round.disabled = point?.kind !== 'corner';
     this.ui.detail.disabled = !this.kit;
-    this.canvas.dataset.points = p ? JSON.stringify(p.anchors.map((a) => this.toScreen(a.p).map((v) => +(v / this.xf.dpr).toFixed(1)))) : '[]';
   }
 
   // ---- edits on the selection (buttons and keys)
@@ -399,7 +405,10 @@ export class OutlineView {
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
     const kit = this.kit, path = this.path;
-    if (!kit || !path) return;
+    if (!kit || !path) {
+      canvas.dataset.points = '[]';
+      return;
+    }
     // fit the trace and the pocket to the pane, leaving room for the bar
     const pts: Ring = [...kit.part.traced, ...kit.part.pocket, ...path.anchors.map((a) => a.p)];
     const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
@@ -504,6 +513,8 @@ export class OutlineView {
     });
     canvas.parentElement!.classList.add('ready');
     canvas.dataset.scale = String(s / dpr);
+    // the points on screen (css px), for tests: written once the transform is known
+    canvas.dataset.points = JSON.stringify(path.anchors.map((a) => this.toScreen(a.p).map((v) => +(v / dpr).toFixed(1))));
     canvas.dataset.origin = JSON.stringify([ox / dpr, oy / dpr]);
   }
 }

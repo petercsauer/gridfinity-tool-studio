@@ -38,4 +38,20 @@ describe('paperBlobs', () => {
     // without the bar: only the stripper itself, one blob (the grid, rulers and text are thinner than the print filter)
     expect(alone.length).toBeLessThanOrEqual(1);
   });
+
+  it.each(['stripper', 'combopliers', 'needlenose', 'flushcutter'])('finds no new blobs on the %s photo under a warm colour cast', async (tool) => {
+    const { canvas } = await rectRegion(presetPhoto(tool), homography(tool), R1, PX);
+    const plain = (await paperBlobs(canvas, [R1[0], R1[1]], PX)).map((b) => b.box);
+    // tungsten light the camera didn't correct: green at 83%, blue at 66%
+    const data = new Uint8ClampedArray(canvas.data);
+    for (let i = 0; i < data.length; i += 4) {
+      data[i + 1] = data[i + 1]! * 0.83;
+      data[i + 2] = data[i + 2]! * 0.66;
+    }
+    // no phantoms on the paper, print or corners: at most the blobs it finds without the cast, each on one of them
+    // (the cast dulls a coloured handle, which the model finds anyway)
+    const tinted = (await paperBlobs({ ...canvas, data }, [R1[0], R1[1]], PX)).map((b) => b.box);
+    expect(tinted.length).toBeLessThanOrEqual(plain.length);
+    for (const b of tinted) expect(plain.some((q) => overlap(b, q) > 0)).toBe(true);
+  });
 });
