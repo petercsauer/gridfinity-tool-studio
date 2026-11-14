@@ -3,10 +3,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { binSize, maxDepth } from './geometry/pocket';
-import { settingsFromParams, type Layout } from './kit';
-import { LayoutView } from './layout-view';
-import { clamp, clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
+import { binSize, bounds, maxDepth, type Vec2 } from './geometry/pocket';
+import { normalizeDeg, placeRing, type Layout, type Placement } from './kit';
+import { hitTest, LayoutView, lockedCells, turnAbout } from './layout-view';
+import { clampParams, DEFAULTS, MAX_CELLS, type Params } from './params';
 import { loadUploads, removeUpload, saveLayout, saveUpload, touchUpload, type StoredUpload } from './storage';
 import { count, uploadErrorEvent } from './count';
 import { writeStl } from './stl';
@@ -14,8 +14,11 @@ import { traceDxf, traceSvg, type TraceLayers } from './trace-export';
 import { isDark, TraceView } from './trace';
 import { decodePhoto } from './vision/decode';
 import { modelCached } from './vision/model';
+import { centroid } from './vision/symmetry';
 import { PipelineClient } from './worker/client';
-import { PipelineError, type BuildResult, type Progress, type ToolInfo, type UploadResult } from './worker/protocol';
+import {
+  PipelineError, type BuildResult, type OutlineResult, type Progress, type ToolInfo, type UploadResult,
+} from './worker/protocol';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const input = (id: string) => $<HTMLInputElement>(id);
@@ -83,17 +86,24 @@ function dropUploadTool(id: string): void {
   if (!uploadGroup.children.length) uploadGroup.remove();
 }
 
-// ---- 2D trace
-const trace = new TraceView($<HTMLCanvasElement>('flat'));
+// ---- 2D trace: clicking a part of a kit selects it, as in the Layout pane
+const trace = new TraceView($<HTMLCanvasElement>('flat'), (pt) => {
+  const r = outlineNow();
+  const l = currentLayout();
+  if (!r || !l || r.parts.length < 2) return;
+  const vis = l.placements.filter((pl) => !pl.hidden);
+  const i = hitTest(pt, vis.map((pl) => r.parts.find((q) => q.id === pl.part)?.sheetPocket ?? []));
+  layoutView.select(i === null ? null : vis[i]!.part);
+});
 
-// ---- layout: where each tool's parts sit in the bin, once the user has arranged them (else the kit's
-// initial layout, which the worker makes). The inspector's pocket settings still apply to every part.
+// ---- layout: where each tool's parts sit in the bin and their pocket settings, once the user has arranged
+// or set them (else the kit's initial layout, which the worker makes from the inspector's values).
 const layouts = new Map<string, Layout>();
-/** The layout to send for a tool, with the inspector's pocket settings. */
-function layoutFor(p: Params): Layout | undefined {
-  const l = layouts.get(p.tool);
-  return l && { ...l, placements: l.placements.map((pl) => ({ ...pl, ...settingsFromParams(p) })) };
-}
+/** The latest outline, for the tool it was made for. */
+let lastOutline: OutlineResult | null = null;
+let lastOutlineTool = '';
+/** Each placement's cut depth in the latest bin (0 for hidden ones), for the tool it was built for. */
+let lastDepths: { tool: string; depths: number[] } | null = null;
 /** Uploads remember their layout; saved 500 ms after the last change to it. */
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingSaves = new Map<string, Layout>();
@@ -115,26 +125,62 @@ addEventListener('pagehide', flushSaves);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushSaves();
 });
-/** A one-part kit's angle shows on the Rotation slider, which can only show 0–90°. */
-function syncRot(): void {
-  const pl = layouts.get(toolMenu.value)?.placements;
-  if (pl?.length !== 1) return;
-  const el = input('rot');
-  el.value = String(clamp(pl[0]!.rot, 0, 90));
-  $('rotV').textContent = `${Math.round(pl[0]!.rot)}°`;
-  syncP(el);
+function setLayout(id: string, layout: Layout): void {
+  layouts.set(id, layout);
+  if (isUpload(id)) queueSave(id, layout);
 }
-const layoutView = new LayoutView($<HTMLCanvasElement>('plan'), $('partList'), $('layoutStatus'), {
+/** The current tool's outline, if the latest one is for it. */
+const outlineNow = () => (lastOutline && lastOutlineTool === toolMenu.value ? lastOutline : null);
+/** The current tool's layout: the user's, or the one its latest outline was made for. */
+const currentLayout = () => layouts.get(toolMenu.value) ?? outlineNow()?.layout;
+/** The selected part's placement in `l`, if it is visible there. */
+const selectedIn = (l: Layout) => l.placements.find((pl) => pl.part === layoutView.selection && !pl.hidden);
+/** The placements the per-part controls show and edit: the selected part, else every visible one. */
+function scope(l: Layout): Placement[] {
+  const sel = selectedIn(l);
+  return sel ? [sel] : l.placements.filter((pl) => !pl.hidden);
+}
+/** The layout before the control being moved was first touched: one undo step per gesture. */
+let gestureStart: Layout | null = null;
+/** Apply a per-part control to the placements in scope. A tool the user hasn't laid out yet takes the
+ * inspector's values for all its parts in its initial layout, so it gets a layout of its own only when some
+ * parts are to differ (or `own`). */
+function editParts(fn: (pl: Placement) => Placement, own = false): void {
+  const id = toolMenu.value;
+  const l = currentLayout();
+  if (!l || (!layouts.has(id) && !own && !selectedIn(l))) {
+    changed();
+    return;
+  }
+  gestureStart ??= l;
+  const ids = new Set(scope(l).map((pl) => pl.part));
+  const next = { ...l, placements: l.placements.map((pl) => (ids.has(pl.part) ? fn(pl) : pl)) };
+  setLayout(id, next);
+  layoutView.preview(next);
+  changed();
+}
+/** A control was let go: its edits become one undo step. */
+function endGesture(): void {
+  const l = layouts.get(toolMenu.value);
+  const start = gestureStart;
+  gestureStart = null;
+  if (start && l && l !== start) layoutView.apply(l, start);
+}
+const layoutView = new LayoutView($<HTMLCanvasElement>('plan'), $('partList'), $('layoutStatus'), $('layoutWarnings'), {
   change(layout, id) {
-    layouts.set(id, layout);
-    syncRot();
-    if (isUpload(id)) queueSave(id, layout);
+    gestureStart = null;
+    setLayout(id, layout);
+    syncInspector();
     changed();
   },
   live({ nx, ny, w, h }) {
     $('cells').textContent = `${nx}×${ny}`;
     $('pdim').textContent = `${w.toFixed(1)}×${h.toFixed(1)} mm`;
     $('bdim').textContent = `${binSize(nx).toFixed(0)}×${binSize(ny).toFixed(0)}×${(state().u * 7).toFixed(0)} mm`;
+  },
+  select(id) {
+    trace.select(id);
+    syncInspector();
   },
 });
 
@@ -462,8 +508,28 @@ let tooLarge = false;
 /** The latest outline refresh; a build waits for it so it sees the current footprint. */
 let pendingOutline: Promise<void> = Promise.resolve();
 
-// ---- trace export: the current outline and pocket as SVG or DXF (1:1 mm)
+// ---- trace export: the current outlines and pockets as SVG or DXF (1:1 mm), as arranged in the bin
 let lastTrace: { tool: string; layers: TraceLayers } | null = null;
+/** The visible parts' tools and pockets where the layout puts them. A kit with several parts is exported in
+ * bin coordinates (the bin centred on the origin, as built) with its parts' ids and the bin's outline; a single
+ * tool as it always was. */
+function traceLayers(r: OutlineResult): TraceLayers {
+  const vis = r.layout.placements.flatMap((pl) => {
+    const q = r.parts.find((t) => t.id === pl.part);
+    return q && !pl.hidden ? [{ pl, q }] : [];
+  });
+  const tools = vis.map(({ pl, q }) => placeRing(q.tool, pl));
+  const pockets = vis.map(({ pl, q }) => placeRing(q.pocket, pl));
+  if (r.layout.placements.length < 2) return { tools, pockets };
+  // an auto-sized bin is centred on its pockets; a locked one on the placements' origin
+  const b = bounds(pockets.flat());
+  const [cx, cy] = r.layout.cells ? [0, 0] : [(b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2];
+  const move = (P: Vec2[]) => P.map(([x, y]): Vec2 => [x - cx, y - cy]);
+  return {
+    tools: tools.map(move), pockets: pockets.map(move), ids: vis.map(({ pl }) => pl.part),
+    bin: { w: binSize(r.nx), h: binSize(r.ny) },
+  };
+}
 function syncTraceExport(): void {
   for (const id of ['expSvg', 'expDxf']) $<HTMLButtonElement>(id).disabled = !lastTrace;
 }
@@ -498,33 +564,34 @@ async function refreshOutline(): Promise<void> {
   const p = state();
   let r;
   try {
-    r = await client.request('outline', { params: p, layout: layoutFor(p) });
+    r = await client.request('outline', { params: p, layout: layouts.get(p.tool) });
   } catch (e) {
     previewMsg.textContent = errorText(e);
     return;
   }
   if (!r) return; // superseded by a newer change
+  lastOutline = r;
+  lastOutlineTool = p.tool;
   $('cells').textContent = `${r.nx}×${r.ny}`; // half cells show as 1.5, 2.5…
   $('pdim').textContent = `${r.w}×${r.h} mm`;
   $('bdim').textContent = `${binSize(r.nx).toFixed(0)}×${binSize(r.ny).toFixed(0)}×${(p.u * 7).toFixed(0)} mm`;
-  const m = r.parts.length === 1 ? r.measure : undefined;
-  $('pocketDims').textContent = m
-    ? `Pocket ${m.pocketSize[0].toFixed(1)} × ${m.pocketSize[1].toFixed(1)} mm · tool ${m.toolSize[0].toFixed(1)} × ${m.toolSize[1].toFixed(1)} mm`
-    : '';
-  $('symNote').hidden = !(p.sym && r.symmetryScore < SYMMETRIC_SCORE);
   tooLarge = r.nx > MAX_CELLS || r.ny > MAX_CELLS;
   if (tooLarge) {
     previewMsg.textContent = `This tool needs a ${r.nx}×${r.ny} bin; the largest is ${MAX_CELLS}×${MAX_CELLS}. ` +
       'Try a smaller rotation or clearance.';
   }
+  layoutView.show({
+    id: p.tool, parts: r.parts, layout: layouts.get(p.tool) ?? r.layout, fillet: p.fillet, halfGrid: p.halfGrid,
+    warnings: r.warnings ?? [],
+  });
+  trace.select(layoutView.selection);
   trace.show(r);
-  layoutView.show({ id: p.tool, parts: r.parts, layout: layouts.get(p.tool) ?? r.layout, fillet: p.fillet, halfGrid: p.halfGrid });
-  input('rot').disabled = r.parts.length > 1; // a kit's parts are turned in the Layout pane
+  syncInspector();
   if (paneTool !== p.tool) {
     paneTool = p.tool;
     showPane(r.parts.length > 1 ? 'layout' : 'trace');
   }
-  lastTrace = { tool: p.tool, layers: { tool: r.tool, pocket: r.pocket } };
+  lastTrace = { tool: p.tool, layers: traceLayers(r) };
   syncTraceExport();
 }
 
@@ -544,10 +611,12 @@ async function generate(): Promise<void> {
     if (tooLarge) blockedVersion = version;
     else {
       const params = state();
-      const r = await client.request('build', { params, layout: layoutFor(params) });
+      const r = await client.request('build', { params, layout: layouts.get(params.tool) });
       if (r) {
         showMesh(r);
         shown = { version, tool: params.tool, bin: r };
+        lastDepths = { tool: params.tool, depths: r.effectiveDepths ?? [] };
+        syncDepth();
         previewMsg.textContent = '';
       }
     }
@@ -586,7 +655,18 @@ const syncP = (el: HTMLInputElement) => {
   const v = +el.value, mn = +el.min, mx = +el.max;
   el.style.setProperty('--p', (mx > mn ? ((v - mn) / (mx - mn)) * 100 : 0) + '%');
 };
-/** Depth slider: capped to the deepest pocket the current height allows, showing the depth that will be cut. */
+/** "Mixed": the parts a per-part control edits differ, so it shows a dimmed thumb (or knob) and no value. */
+const isMixed = (el: HTMLInputElement) => el.closest('.row')!.classList.contains('mixed');
+function setMixed(el: HTMLInputElement, on: boolean): void {
+  el.closest('.row')!.classList.toggle('mixed', on);
+  el.classList.toggle('mixed', on);
+  if (on && el.type === 'range') el.setAttribute('aria-valuetext', 'Mixed');
+  else el.removeAttribute('aria-valuetext');
+}
+/** "1", "1 and 2", "1, 2 and 3". */
+const andList = (ns: number[]) => (ns.length < 2 ? String(ns[0] ?? '') : `${ns.slice(0, -1).join(', ')} and ${ns.at(-1)}`);
+/** Depth slider: capped to the deepest pocket the current height allows, showing the depth that will be cut
+ * (or "Mixed"); for kits with several parts the note lists the depth each part was cut to. */
 function syncDepth(): void {
   const el = input('depth');
   const p = state();
@@ -597,13 +677,144 @@ function syncDepth(): void {
   el.max = String(min + Math.ceil((deepest - min) / 0.5) * 0.5); // step-aligned, so the slider can reach `deepest`
   el.disabled = deepest <= 0;
   el.value = String(Math.min(+el.value, +el.max));
-  $('depthV').textContent = trim(Math.min(+el.value, deepest));
+  $('depthV').textContent = isMixed(el) ? 'Mixed' : trim(Math.min(+el.value, deepest));
   const note = $('depthNote');
-  note.textContent = deepest > 0
+  let text = deepest > 0
     ? `Deepest pocket at ${u}U: ${trim(deepest)} mm.`
     : `A ${u}U bin is too short for a pocket. Use 2U or taller.`;
+  const l = currentLayout();
+  const cut = lastDepths?.tool === toolMenu.value ? lastDepths.depths : [];
+  if (deepest > 0 && l && l.placements.length > 1 && cut.length === l.placements.length) {
+    text += ` Cut depths: ${l.placements.flatMap((pl, i) => (pl.hidden ? [] : [`part ${i + 1} ${trim(cut[i]!)} mm`])).join(', ')}.`;
+  }
+  note.textContent = text;
   note.classList.toggle('warn', deepest <= 0);
   syncP(el);
+}
+/** A slider's value for the placements it shows: theirs, or "Mixed" when they differ. */
+function showRange(id: string, values: number[], fmt: (v: number) => string): void {
+  const el = input(id);
+  const mixed = values.some((v) => v !== values[0]);
+  el.value = String(values[0]);
+  setMixed(el, mixed);
+  $(id + 'V').textContent = mixed ? 'Mixed' : fmt(+el.value);
+  syncP(el);
+}
+function showSwitch(id: string, values: boolean[]): void {
+  const el = input(id);
+  const mixed = values.some((v) => v !== values[0]);
+  el.checked = !mixed && !!values[0];
+  setMixed(el, mixed);
+}
+const PER_PART = ['sym', 'clearance', 'slotOn', 'slotD', 'slotFrac', 'depth', 'rot'];
+/** The inspector for the current tool and selection: what the per-part controls edit and their values, the
+ * bin size, the hidden parts, and the selected (or only) part's pocket size and symmetry note. */
+/** The per-part controls (Rotation aside, which always shows its part's angle), and how each shows its value. */
+const OWN: Record<string, ((v: number) => string) | null> = {
+  sym: null, slotOn: null,
+  clearance: trim, slotD: String, slotFrac: (v) => String(Math.round(v * 100)), depth: trim,
+};
+/** The inspector's own per-part values, as last shown (kept while the controls show a laid-out tool's parts,
+ * which an edit can start before the next sync), and whether they show such a tool's parts now. */
+let ownControls: Map<string, string | boolean> | null = null;
+let showingLayout = false;
+function snapshotControls(): Map<string, string | boolean> {
+  return new Map(Object.keys(OWN).map((id) => [id, OWN[id] ? input(id).value : input(id).checked]));
+}
+function restoreControls(saved: Map<string, string | boolean>): void {
+  for (const [id, v] of saved) {
+    const el = input(id);
+    const fmt = OWN[id];
+    if (fmt) {
+      el.value = String(v);
+      $(id + 'V').textContent = fmt(+el.value);
+      syncP(el);
+    } else el.checked = v as boolean;
+  }
+  syncDepth();
+}
+function syncInspector(): void {
+  const l = currentLayout();
+  const r = outlineNow();
+  const vis = l?.placements.filter((pl) => !pl.hidden) ?? [];
+  const sel = l && selectedIn(l);
+  const multi = (l?.placements.length ?? 0) > 1;
+  const inScope = l ? scope(l) : [];
+  const num = (id: string) => (l?.placements.findIndex((pl) => pl.part === id) ?? -1) + 1;
+  const trace = (id: string) => r?.parts.find((q) => q.id === id);
+  $('scope').hidden = !multi;
+  $('scopeText').textContent = sel ? `Part ${num(sel.part)}` : `All parts (${vis.length})`;
+  $('scopeClear').hidden = !sel;
+  // the parts' own values once the user has a layout; until then they all have the inspector's
+  for (const id of PER_PART) setMixed(input(id), false);
+  // the controls show a laid-out tool's parts; the inspector's own values (what a tool without a layout of its
+  // own takes) are put aside meanwhile and back after, so a Mixed or unchecked state doesn't carry over
+  const ownLayout = layouts.has(toolMenu.value) && inScope.length > 0;
+  if (!ownLayout) {
+    if (showingLayout && ownControls) restoreControls(ownControls);
+    ownControls = snapshotControls();
+  }
+  showingLayout = ownLayout;
+  if (ownLayout) {
+    showSwitch('sym', inScope.map((pl) => pl.sym));
+    showRange('clearance', inScope.map((pl) => pl.clearance), trim);
+    showSwitch('slotOn', inScope.map((pl) => pl.slotOn));
+    showRange('slotD', inScope.map((pl) => pl.slotR * 2), String);
+    showRange('slotFrac', inScope.map((pl) => pl.slotFrac), (v) => String(Math.round(v * 100)));
+    showRange('depth', inScope.map((pl) => pl.depth), trim);
+  }
+  // rotation turns one part: the selected one, or a kit's only one
+  const turnable = !!sel || vis.length === 1;
+  input('rot').disabled = !turnable;
+  if (inScope.length) showRange('rot', inScope.map((pl) => Math.round(pl.rot)), (v) => `${v}°`);
+  const one = turnable ? inScope[0] : undefined;
+  const axis = one ? one.rot + (trace(one.part)?.axisDeg ?? 0) : NaN;
+  const along = (deg: number) => Math.abs(normalizeDeg(axis - deg)) < 0.5 || Math.abs(normalizeDeg(axis - deg - 180)) < 0.5;
+  for (const [id, deg] of [['rot0', 0], ['rot90', 90]] as const) {
+    $<HTMLButtonElement>(id).disabled = !turnable;
+    $(id).setAttribute('aria-pressed', String(along(deg)));
+  }
+  // bin size: auto, or locked to the layout's cells
+  const half = input('halfGrid').checked;
+  const cells = l?.cells ? lockedCells(l.cells, half) : r ? [r.nx, r.ny] : null;
+  input('autoSize').checked = !l?.cells;
+  input('autoSize').disabled = !l;
+  (['cellsX', 'cellsY'] as const).forEach((id, i) => {
+    const el = input(id);
+    el.step = el.min = half ? '0.5' : '1';
+    el.max = String(MAX_CELLS);
+    el.disabled = !l?.cells;
+    if (cells) el.value = String(cells[i]);
+  });
+  // hidden parts, each with Restore
+  const hidden = l?.placements.filter((pl) => pl.hidden) ?? [];
+  $('hiddenHead').hidden = $('hiddenParts').hidden = !hidden.length;
+  $('hiddenParts').replaceChildren(...hidden.map((pl) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const name = document.createElement('span');
+    name.textContent = `Part ${num(pl.part)}`;
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = 'Restore';
+    btn.dataset.part = pl.part;
+    btn.setAttribute('aria-label', `Restore part ${num(pl.part)}`);
+    row.append(name, btn);
+    return row;
+  }));
+  // the pocket size of the selected (or only) part, and which parts in scope aren't symmetric enough
+  const shown = r && (r.parts.length === 1 ? r.parts[0] : sel ? trace(sel.part) : undefined);
+  const m = shown?.measure;
+  $('pocketDims').textContent = m
+    ? `Pocket ${m.pocketSize[0].toFixed(1)} × ${m.pocketSize[1].toFixed(1)} mm · tool ${m.toolSize[0].toFixed(1)} × ${m.toolSize[1].toFixed(1)} mm`
+    : '';
+  const asym = inScope.filter((pl) => pl.sym && (trace(pl.part)?.symmetryScore ?? 1) < SYMMETRIC_SCORE).map((pl) => num(pl.part));
+  const symNote = $('symNote');
+  symNote.hidden = !asym.length;
+  symNote.textContent = !multi ? 'This tool doesn’t look symmetric — the pocket will be wider than needed.'
+    : asym.length === 1 ? `Part ${asym[0]} doesn’t look symmetric — its pocket will be wider than needed.`
+      : `Parts ${andList(asym)} don’t look symmetric — their pockets will be wider than needed.`;
+  syncDepth();
 }
 const bind = (id: string, fmt: (v: number) => string) => {
   const el = input(id), out = $(id + 'V');
@@ -613,24 +824,98 @@ const bind = (id: string, fmt: (v: number) => string) => {
     changed();
   });
 };
-bind('clearance', trim);
-bind('rot', (v) => v + '°');
-// the slider turns a one-part kit the user has laid out (until then it sets the initial layout's angle)
-input('rot').addEventListener('input', () => {
-  const l = layouts.get(toolMenu.value);
-  if (l?.placements.length === 1) layoutView.apply({ ...l, placements: [{ ...l.placements[0]!, rot: +input('rot').value }] });
-});
-bind('slotD', (v) => String(v));
-bind('slotFrac', (v) => String(Math.round(v * 100)));
+/** A per-part slider: edits the parts in scope as it moves, one undo step per drag. */
+function bindPart(id: string, fmt: (v: number) => string, write: (pl: Placement, v: number) => Placement): void {
+  const el = input(id), out = $(id + 'V');
+  out.textContent = fmt(+el.value);
+  el.addEventListener('input', () => {
+    setMixed(el, false);
+    out.textContent = fmt(+el.value);
+    editParts((pl) => write(pl, +el.value));
+  });
+  el.addEventListener('change', endGesture);
+}
+bindPart('clearance', trim, (pl, v) => ({ ...pl, clearance: v }));
+bindPart('slotD', String, (pl, v) => ({ ...pl, slotR: v / 2 }));
+bindPart('slotFrac', (v) => String(Math.round(v * 100)), (pl, v) => ({ ...pl, slotFrac: v }));
 bind('u', (v) => v + 'U');
 bind('fillet', trim);
 bind('bfillet', trim);
 input('u').addEventListener('input', syncDepth);
 input('depth').addEventListener('input', () => {
+  setMixed(input('depth'), false);
   syncDepth();
-  changed();
+  editParts((pl) => ({ ...pl, depth: +input('depth').value }));
 });
-input('slotOn').addEventListener('change', changed);
+input('depth').addEventListener('change', endGesture);
+for (const id of ['sym', 'slotOn'] as const) {
+  input(id).addEventListener('change', () => {
+    setMixed(input(id), false);
+    editParts((pl) => ({ ...pl, [id]: input(id).checked }));
+    endGesture();
+    syncInspector();
+  });
+}
+/** The part-frame point a part turns about: its pocket's centroid, as in the Layout pane. */
+function pivot(id: string): Vec2 {
+  const t = outlineNow()?.parts.find((q) => q.id === id);
+  return t ? centroid(t.pocket) : [0, 0];
+}
+/** Turn the part in scope to `rot` degrees; this always gives the tool a layout of its own. */
+const turnTo = (rot: number) => editParts((pl) => turnAbout(pl, pivot(pl.part), normalizeDeg(rot)), true);
+input('rot').addEventListener('input', () => {
+  setMixed(input('rot'), false);
+  $('rotV').textContent = `${input('rot').value}°`;
+  turnTo(+input('rot').value);
+});
+input('rot').addEventListener('change', endGesture);
+// 0° and 90°: the part's axis along the bin or across it
+for (const [id, deg] of [['rot0', 0], ['rot90', 90]] as const) {
+  $(id).addEventListener('click', () => {
+    const l = currentLayout();
+    const pl = l && scope(l)[0];
+    if (!pl) return;
+    turnTo(deg - (outlineNow()?.parts.find((q) => q.id === pl.part)?.axisDeg ?? 0));
+    endGesture();
+    syncInspector();
+  });
+}
+$('scopeClear').addEventListener('click', () => layoutView.select(null));
+$('hiddenParts').addEventListener('click', (e) => {
+  const id = (e.target as HTMLElement).closest<HTMLElement>('button[data-part]')?.dataset.part;
+  const l = currentLayout();
+  if (!id || !l) return;
+  layoutView.apply({ ...l, placements: l.placements.map((pl) => (pl.part === id ? { ...pl, hidden: false } : pl)) }, l);
+});
+// bin size: locking keeps the parts where they are (the locked bin is centred on the origin) at the size
+// they need now; unlocking lets the bin grow to fit them again
+input('autoSize').addEventListener('change', () => {
+  const l = currentLayout();
+  const r = outlineNow();
+  if (!l || !r) return;
+  if (input('autoSize').checked) {
+    layoutView.apply({ placements: l.placements }, l);
+    return;
+  }
+  const rings = l.placements.filter((pl) => !pl.hidden)
+    .map((pl) => placeRing(r.parts.find((q) => q.id === pl.part)?.pocket ?? [], pl)).filter((P) => P.length);
+  const b = bounds(rings.flat());
+  const cx = (b.xmin + b.xmax) / 2;
+  const cy = (b.ymin + b.ymax) / 2;
+  layoutView.apply({
+    placements: l.placements.map((pl) => ({ ...pl, x: pl.x - cx, y: pl.y - cy })),
+    cells: lockedCells([r.nx, r.ny], input('halfGrid').checked),
+  }, l);
+});
+(['cellsX', 'cellsY'] as const).forEach((id, i) => {
+  input(id).addEventListener('change', () => {
+    const l = currentLayout();
+    if (!l?.cells) return;
+    const cells: [number, number] = [...l.cells];
+    cells[i] = +input(id).value;
+    layoutView.apply({ ...l, cells: lockedCells(cells, input('halfGrid').checked) }, l);
+  });
+});
 /** Holes and Corners only: unavailable with half-grid feet, and Corners only needs a hole style. */
 function syncBase(): void {
   const half = input('halfGrid').checked;
@@ -655,13 +940,13 @@ input('lip').addEventListener('change', () => {
   syncDepth();
   changed();
 });
-input('sym').addEventListener('change', changed);
 /** Switch defaults and the Remove row for the selected tool. */
 function applyToolDefaults(): void {
   const id = toolMenu.value;
   const t = tools.find((x) => x.id === id);
   if (t) input('sym').checked = t.sym;
-  syncRot();
+  gestureStart = null;
+  syncInspector();
   $('rmRow').hidden = !isUpload(id);
   if (isUpload(id)) void touchUpload(id).catch(() => {});
 }

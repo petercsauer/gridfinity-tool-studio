@@ -46,7 +46,7 @@ describe.each(index)('shipped preset $id', ({ id, sym }) => {
     const o = await outline(params, { manifold: m, presets: shipped });
     expect(o.nx).toBeLessThanOrEqual(MAX_CELLS);
     expect(o.ny).toBeLessThanOrEqual(MAX_CELLS);
-    expect(!!o.sheetAxis).toBe(sym);
+    expect(!!o.parts[0]!.sheetAxis).toBe(sym);
     const b = await build(params, { manifold: m, presets: shipped });
     expect([b.nx, b.ny]).toEqual([o.nx, o.ny]);
     expect(b.indices.length).toBeGreaterThan(1000);

@@ -1,6 +1,9 @@
 // Bin parameters, their allowed ranges (the inspector's slider ranges) and clamping.
 import { maxDepth, type HoleStyle } from './geometry/pocket';
 
+/** The per-part fields (sym, clearance, rot, the slot and depth) are what a kit's parts start with when it
+ * has no layout yet (kit.ts initialLayout); a layout's placements carry their own. `rot` only turns a one-part
+ * kit's initial layout (0-90°); the inspector turns a placed part through -180…180° in its layout. */
 export interface Params {
   tool: string;
   sym: boolean;

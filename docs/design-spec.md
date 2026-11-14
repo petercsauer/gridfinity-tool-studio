@@ -38,7 +38,7 @@ The window should feel like a native Mac pro tool: the tool photo and the 3D bin
   5. **Edges:** Top fillet (`#fillet`, mm) and Bottom round (`#bfillet`, mm).
 - **Canvases:** the content column below the toolbar band splits **side by side** into two equal panes, with a 1 px hairline between them (the thin split-view divider). Trace is on the left and 3D on the right. Below 1100 px of viewport width the panes **stack** (trace on top), with the same hairline running horizontally. Both panes are edge-to-edge content: no card, no border and no radius. The 3D pane has a tiny sentence-case caption at its top left ("Preview"; Subheadline 11 px, weight 500, `--label-2`, plain text with no glass). The left pane's caption is a glass capsule switching it between **Layout** and **Trace** (see 3.16).
   - **Layout pane:** a top-down view of the bin on `--bg-canvas`, where a kit's parts are moved and turned. Kits with several parts open here.
-  - **Trace pane:** a neutral `--bg-canvas` surface. The photo is aspect-fit and is the only colorful thing. The legend is a small regular-glass chip at bottom left with a 12 px inset.
+  - **Trace pane:** a neutral `--bg-canvas` surface. The photo is aspect-fit and is the only colorful thing. The legend is a small regular-glass chip at bottom left with a 12 px inset. It shows every part where it was photographed; in a kit, clicking a part selects it (the same selection as the Layout pane and the part list).
   - **3D pane:** a Quick Look style seamless gradient backdrop (a CSS gradient behind a transparent WebGL canvas). A regular-glass capsule floats at top right with a 12 px inset. It holds `#spin` (an unlabeled spinner with a short "Updating" label, delayed in) and `#gen` (an icon button, `arrow.clockwise`, with the tooltip "Regenerate the 3D preview").
 - **Primary action:** `#exp` **Export STL** is the only tinted control in the window. `#gen` is demoted to a secondary icon, because the preview already regenerates on every change (`changed()` → `dGenerate`).
 - **Upload flow:** clicking **Upload Photo…** opens the native file picker (`#upFile.click()`). While the upload runs, the script disables `#upBtn`. CSS then shows a 12 px inline spinner inside the button and dims its label. `#upMsg` sits directly under the Tool card as the section footer and carries the status. The script sets its text and its `style.color` to `var(--muted)` (working/help), `var(--accent2)` (error) or `var(--ok)` (success). Those three variables are kept as aliases of text-safe system colors (section 2). Errors stay inline next to their cause, with no alerts and no toasts. Export success gets no toast, because the browser's download UI is the confirmation.
@@ -324,7 +324,7 @@ Markup pattern (ids unchanged; the `<b>` keeps id `xV`):
   | id | range / step / default | value text (JS) | static unit span |
   |---|---|---|---|
   | `clearance` | 0–5 / 0.1 / 2.5 | `2.5` | `mm` |
-  | `rot` | 0–90 / 1 / 0 | `0°` (JS adds °) | none (° already present; no space, per Apple style) |
+  | `rot` | −180–180 / 1 / 0 | `0°` (JS adds °) | none (° already present; no space, per Apple style) |
   | `slotD` | 8–40 / 1 / 25 | `25` | `mm` |
   | `slotFrac` | 0–1 / 0.01 / 0.4 | `0.40` | none. A dimensionless fraction of tool length. The row label reads **Position** and the card footer explains it: "Slot position along the tool, from 0 to 1." |
   | `u` | 1–8 / 1 / 3 | `3U` (JS adds U) | none (U already present) |
@@ -339,7 +339,7 @@ Markup pattern (ids unchanged; the `<b>` keeps id `xV`):
   `--p` is set by an additive JS listener: `el.style.setProperty('--p', (v-min)/(max-min)*100+'%')` on `input` and at load. It runs alongside the script's own listener and does not replace it.
 - **Thumb (white lozenge):** `::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:16px;margin-top:-5px;border-radius:8px;background:#fff;box-shadow:var(--shadow-thumb);transition:transform var(--dur-release) var(--ease-snappy), background var(--dur-fast)}`. In dark mode the thumb is `#E6E6E6`. Mirror these values in `::-moz-range-thumb`.
 - **Thumb while dragging (glass lift):** `input[type=range]:active::-webkit-slider-thumb{transform:scale(1.25);background:rgba(255,255,255,.35);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.9), inset 0 1px 1px rgba(255,255,255,.8), 0 3px 10px rgba(0,0,0,.20)}`. The track fill shows through the knob. It springs back with `--ease-snappy` when released. Under reduced motion it gets no scale and only the background change.
-- **Tick dots** (`#u` only: 8 values, and `#rot` at 0/15/…/90 for 7 dots): an absolutely positioned `.ticks` row under the track. Dots are 2×2 px, `border-radius:50%; background:var(--label-3)`, with `top:` 4 px below the track. The end dots are inset 10 px (half the thumb width), distributed with `justify-content:space-between`. The row grows by 6 px.
+- **Tick dots** (`#u` only: 8 values, and `#rot` at −180/−135/…/180 for 9 dots): an absolutely positioned `.ticks` row under the track. Dots are 2×2 px, `border-radius:50%; background:var(--label-3)`, with `top:` 4 px below the track. The end dots are inset 10 px (half the thumb width), distributed with `justify-content:space-between`. The row grows by 6 px.
 - No hover state. The arrow cursor stays.
 - Live feedback: the value text and the 2D trace update on `input` with no transition (the script already does this). Discrete changes such as switches also get no animated geometry.
 - **Finger-slot dependents:** `.card:has(#slotOn:not(:checked)) .row.slider{opacity:.5;transition:opacity var(--dur-std) var(--ease-ca)}`. They stay operable, because there is no `disabled` attribute and the script still reads them.
@@ -354,7 +354,7 @@ They are still `<input type="checkbox">` with the same id and `checked` default.
 - `:checked{background:var(--accent)}` and `:checked::before{transform:translateX(14px)}`.
 - `:active::before{width:24px}`, so the knob stretches toward its travel direction (and `:checked:active::before{transform:translateX(10px)}`).
 - The whole row label is clickable via `for`.
-- Labels and help: **Symmetric tool**, with the footer line under the Tool card explaining it. Note that `#upMsg` occupies the footer, so the symmetric hint goes into the switch row's `title` instead: "Mirror the outline for a clean, even cutout". **Grab slot** is the first row of the Finger slot card.
+- Labels and help: **Symmetric tool**, the first row of the Pocket card (it is a per-part setting, see 3.17). Note that `#upMsg` occupies the footer, so the symmetric hint goes into the switch row's `title` instead: "Mirror the outline for a clean, even cutout". **Grab slot** is the first row of the Finger slot card.
 
 ### 3.5 Pop-up (`#tool`, which stays a `<select>`; the script fills its `<option>`s)
 - Row: `<label for="tool">Tool</label>` on the left, then the select, `max-width:170px; flex:0 1 170px`.
@@ -410,6 +410,7 @@ They are still `<input type="checkbox">` with the same id and `checked` default.
 - Tool: halo `3.5*dpr` white at .7, then stroke `cTool` at `1.6*dpr`. Use `lineJoin='round'`.
 - Note: the current code uses device-pixel line widths of 2 and 1.6 without dpr. Multiplying by `devicePixelRatio` is optional. If you do it, apply it uniformly.
 - Redraw on `matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawFlat)`.
+- **Several parts:** every part's pocket and tool are drawn as above. The selected part's pocket has the stronger fill (`.3`) and a `2.8*dpr` stroke, as in the Layout pane, and only the selected part gets dimension lines; with nothing selected a kit has none. A single tool always has its dimensions.
 
 ### 3.14 3D viewer look (Quick Look product shot; 3D setup and `showSTL`)
 - Renderer: `new THREE.WebGLRenderer({canvas:tc, antialias:true, alpha:true})`, `renderer.setClearColor(0x000000, 0)`, `scene.background = null` (the CSS gradient shows through), `renderer.outputColorSpace = THREE.SRGBColorSpace`, `renderer.toneMapping = THREE.ACESFilmicToneMapping`, `toneMappingExposure = 1.0`.
@@ -435,7 +436,18 @@ Small presentation-only listeners, kept separate from the app logic:
 - **Switch** (`.pane-switch.glass`, `role=tablist`): a 36 px regular-glass capsule at top left with an 8 px inset, holding two 28 px tabs ("Layout", "Trace"; 11 px, weight 500). The selected tab is a `--bg-field` pill with `--shadow-pill`; the other is `--label-2` text. It sits over `--bg-canvas`, never over the WebGL canvas.
 - **Canvas** (`#plan`, `tabindex=0`, `touch-action:none`): the bin as a `--bg-window` rounded rect with a soft shadow and a `--label-3` hairline, cell lines (42 mm, or 21 mm with half-grid feet) in `--separator`, and the area a pocket may use as a dashed `--label-3` inset. Pockets and tools are drawn as on the trace (3.13) with a `--bg-canvas` halo. The selected part has a stronger pocket fill, its axis dashed in `--trace-axis`, and a 7 px `--thumb` rotation handle 12 mm beyond it on a `--label-2` stem. While the axis is snapped to 0/90°, a solid `--trace-axis` guide runs across the bin.
 - **Part list** (`#partList`, `role=listbox`, roving tabindex) and **status** (`#layoutStatus`, `aria-live=polite`) sit at bottom left: the list uses the `.sheet-seg` look (a `--fill` capsule of 24 px pills, the selected one a `--bg-field` pill); the status is Subheadline `--label-2`. No glass, and no tinted controls.
-- **Keys** on the canvas and the list: Tab/Shift+Tab pick a part (then move on, no trap), arrows move it 1 mm (Shift 10 mm), `[`/`]` turn it 90°, Delete removes it, Escape deselects, Cmd/Ctrl+Z undoes and Shift+Cmd/Ctrl+Z redoes.
+- **Keys** on the canvas and the list: Tab/Shift+Tab pick a part (then move on, no trap), arrows move it 1 mm (Shift 10 mm), `[`/`]` turn it 90°, Delete hides it (see Hidden parts, 3.17), Escape deselects, Cmd/Ctrl+Z undoes and Shift+Cmd/Ctrl+Z redoes.
+- **Warnings** (`#layoutWarnings`, inside a `role=status` wrapper): under the switch at top left, one Subheadline line each in `--warning` (as `.footer.warn`) after a 12 px `--orange` "!" disc, sentence case with a full stop: "Parts 2 and 3 overlap; their pockets will merge.", "The wall between parts 1 and 4 is thinner than 1.2 mm.", "Part 3 sticks out of the locked 3×4 bin." The canvas fits below them. Each part a warning names gets a 14 px `--orange` "!" badge at its pocket's top right (with a `--bg-canvas` halo) and a 6 px `--orange` dot after its name in the part list. No glass, no banner.
+- **Too close, live:** while a part is dragged, it and every part too close to it (pockets overlapping or a wall under the minimum, from the worker's grown rings) get their keep-out ring dashed in `--destructive`. The worker's warnings replace this on release. Badges are hidden while dragging.
+- **Locked size:** the bin is the locked cell count centred on the origin; the view fits both the bin and any part outside it.
+
+### 3.17 Per-part inspector states (`web/src/main.ts` `syncInspector`)
+- **Scope** (`#scope`, kits with several parts only): right-aligned on the "Pocket" section header row, Subheadline `--label-2`, tabular numbers. "All parts (N)" with nothing selected, else "Part K · Clear", where Clear (`#scopeClear`) is a borderless `--accent` text button that clears the selection. Symmetric tool, Clearance, Rotation, Depth and the Finger slot card edit the parts in scope; Height, Size, Base and Edges stay bin-wide.
+- **Mixed** (the parts in scope differ): the row gets `.mixed`. A slider's value text reads "Mixed" in `--label-2` with no unit, its track has no fill and its thumb is at 40% opacity; `aria-valuetext="Mixed"`. A switch gets `--fill-pressed` with its knob centred at 60% opacity. Moving the control sets every part in scope and clears the state.
+- **Rotation:** −180…180° for one part (the selected one, or a kit's only one), disabled with "All parts" in a kit with several. A small `--fill` capsule of two 18 px pills, "0°" and "90°" (Footnote, weight 600), sits between the label and the value; they turn the part's axis along or across the bin, and the one matching the current axis is pressed (`aria-pressed=true`, a `--bg-field` pill with `--shadow-pill`), which shows the snapped state.
+- **Notes under the Pocket card:** the symmetry warning (`#symNote`, `.footer.warn`) names the parts in scope whose mirror score is under 0.92; the pocket size (`#pocketDims`) is the selected (or only) part's; the depth note adds "Cut depths: part 1 10 mm, part 2 8 mm." from the last build for kits with several parts.
+- **Bin size** (Bin card): an "Auto size" switch, then a "Size" row with two 44 px number fields (`#cellsX`, `#cellsY`; `--bg-field`, `--shadow-pill`, radius `--r-field`), a `--label-2` "×" between them and a "cells" unit. They show the current size and are disabled (`--fill`, `--label-2` text) while Auto is on. Turning Auto off locks the current size (steps of 1, or 0.5 with half-grid feet, up to 8).
+- **Hidden parts** (`#hiddenHead`, `#hiddenParts`): shown only when a part is hidden, as a section after the upload message: one row per part, "Part K" and a `.btn` "Restore".
 
 ---
 
@@ -481,7 +493,7 @@ The script depends on these ids and variables; keep them when changing the marku
    - `<select id="tool">`. The script fills its options; keep it empty in the markup.
    - `<button id="upBtn">`, `<input type="file" id="upFile" accept="image/*">` (hidden), `<div id="upMsg">` (text-only content; the script overwrites `textContent` and `style.color`).
    - `<input type="checkbox" id="sym">` (unchecked) and `<input type="checkbox" id="slotOn" checked>`. They are still checkboxes, styled as switches with `role="switch"`.
-   - `<input type="range">` with **unchanged** min/max/step/value: `clearance` 0/5/0.1/2.5, `rot` 0/90/1/0, `slotD` 8/40/1/25, `slotFrac` 0/1/0.01/0.4, `u` 1/8/1/3, `depth` 3/40/0.5/10, `fillet` 0/6/0.25/3.18, `bfillet` 0/4/0.25/0.
+   - `<input type="range">` with **unchanged** min/max/step/value: `clearance` 0/5/0.1/2.5, `rot` −180/180/1/0, `slotD` 8/40/1/25, `slotFrac` 0/1/0.01/0.4, `u` 1/8/1/3, `depth` 3/40/0.5/10, `fillet` 0/6/0.25/3.18, `bfillet` 0/4/0.25/0.
    - Value outputs `clearanceV, rotV, slotDV, slotFracV, uV, depthV, filletV, bfilletV` (elements whose `textContent` the script sets; units live in sibling spans, never inside them).
    - `<button id="gen">`, `<button id="exp" disabled>` (it must start disabled).
    - `#cells, #pdim, #bdim` (text-only).

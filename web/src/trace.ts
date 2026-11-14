@@ -1,7 +1,8 @@
 // The Trace pane: the perspective-corrected calibration sheet with every part's tool (blue) and
 // pocket (red) outlines drawn where the part lies on the paper, all in sheet mm, plus each mirror
-// axis (green, dashed) where "Symmetric tool" is on, and, for a single part, the pocket's width and
-// length as dimension lines, measured along the part's own axes.
+// axis (green, dashed) where "Symmetric tool" is on, and, for the selected (or only) part, the
+// pocket's width and length as dimension lines, measured along the part's own axes. Clicking the
+// sheet reports the point (sheet mm), so the app can select the part there.
 import type { Measurements, OutlineResult } from './worker/protocol';
 
 export const isDark = () => document.documentElement.dataset.theme === 'dark';
@@ -142,9 +143,25 @@ export class TraceView {
   private image = new Image();
   private imageUrl = '';
   private outline: OutlineResult | null = null;
+  private selected: string | null = null;
+  /** Sheet mm to css px, as last drawn: (ox + (x - bx0)·s, oy + (y - by0)·s). */
+  private view = { ox: 0, oy: 0, s: 1, bx0: 0, by0: 0 };
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(private readonly canvas: HTMLCanvasElement, onPick?: (pt: Pt) => void) {
     this.ctx = canvas.getContext('2d')!;
+    if (onPick) {
+      canvas.addEventListener('click', (e) => {
+        const r = canvas.getBoundingClientRect();
+        const { ox, oy, s, bx0, by0 } = this.view;
+        onPick([(e.clientX - r.left - ox) / s + bx0, (e.clientY - r.top - oy) / s + by0]);
+      });
+    }
+  }
+
+  /** Highlight a part (by id; null for none) and draw its dimensions. */
+  select(id: string | null): void {
+    this.selected = id;
+    this.draw();
   }
 
   /** Show a new outline; loads its sheet image if it changed. */
@@ -178,8 +195,9 @@ export class TraceView {
     const o = this.outline;
     if (!o) return;
     const { parts } = o;
-    // dimensions only for a single part; with several the lines would cross each other
-    const measure = parts.length === 1 ? parts[0]!.measure : undefined;
+    // dimensions for the only part or the selected one; for all of them the lines would cross each other
+    const sel = parts.length === 1 ? parts[0] : parts.find((q) => q.id === this.selected);
+    const measure = sel?.measure;
     // the whole calibration sheet, fitted to the pane
     const [bx0, by0, bx1, by1] = o.sheetBox;
     const bw = bx1 - bx0;
@@ -206,6 +224,7 @@ export class TraceView {
         oy = (H - (y1 - y0) * s) / 2 + (by0 - y0) * s;
       }
     }
+    this.view = { ox: ox / dpr, oy: oy / dpr, s: s / dpr, bx0, by0 };
     const img = this.image;
     if (img.complete && img.naturalWidth) {
       ctx.save();
@@ -237,14 +256,16 @@ export class TraceView {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     const halo = 'rgba(255,255,255,.7)'; // the paper is light in both themes
+    // the selected part (of several) emphasised, as in the Layout pane
+    const hi = parts.length > 1 ? sel : undefined;
     for (const q of parts) {
       path(q.sheetPocket);
       ctx.lineWidth = 4 * dpr;
       ctx.strokeStyle = halo;
       ctx.stroke();
-      ctx.fillStyle = rgba(cPocket, 0.14);
+      ctx.fillStyle = rgba(cPocket, q === hi ? 0.3 : 0.14);
       ctx.fill();
-      ctx.lineWidth = 2 * dpr;
+      ctx.lineWidth = (q === hi ? 2.8 : 2) * dpr;
       ctx.strokeStyle = cPocket;
       ctx.stroke();
     }
@@ -279,6 +300,7 @@ export class TraceView {
         W, H, dpr);
     }
     flat.parentElement!.classList.toggle('has-measure', !!measure);
+    flat.dataset.selected = hi?.id ?? '';
     flat.parentElement!.classList.add('ready');
   }
 }
