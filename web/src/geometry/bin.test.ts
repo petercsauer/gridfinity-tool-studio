@@ -27,11 +27,13 @@ function centred(P: Ring): Ring {
 
 /** Vertex count and volume of each fixture bin with bfillet 1 and both base holes, as cut before pockets had
  * their own depths (c5b57b8). */
-const SINGLE_CUT: Record<(typeof TOOLS)[number], [number, number]> = {
-  needlenose: [67286, 223562.68481249735],
-  combopliers: [72138, 344554.05245921994],
-  flushcutter: [69620, 277182.377370868],
-  stripper: [73862, 411199.66135931615],
+/** Volumes (mm³) of each fixture's single-pocket bin (bottom round 1, every base hole) before the round-over
+ * layers were simplified to 0.02 mm; the simplified bin stays within 0.005% of them (it moves under 0.002%, and losing half the bottom round would move it 0.02%). */
+const UNSIMPLIFIED_VOLUME: Record<(typeof TOOLS)[number], number> = {
+  needlenose: 223562.68481249735,
+  combopliers: 344554.05245921994,
+  flushcutter: 277182.377370868,
+  stripper: 411199.66135931615,
 };
 
 describe.each(TOOLS)('bin parity: %s', (tool) => {
@@ -65,12 +67,14 @@ describe.each(TOOLS)('bin parity: %s', (tool) => {
     expect([r.nx, r.ny]).toEqual(fx.footprint);
   });
 
-  it('cuts one pocket with its own depth exactly as a single pocket was cut before per-part depths', () => {
+  it('cuts one pocket with its own depth exactly as a single pocket at the bin depth', () => {
     // with a bottom round and every base hole, where one batch difference would change the mesh
-    const r = genbin(m, [{ ring: centred(fx.pocket_mm), depth: p.depth }], nx, ny, { ...p, depth: 0, bfillet: 1, holes: 'both' });
-    const [vertices, volume] = SINGLE_CUT[tool];
-    expect(r.positions.length / 3).toBe(vertices);
-    expect(Math.abs(r.volume - volume)).toBeLessThanOrEqual(1e-9);
+    const q = { ...p, bfillet: 1, holes: 'both' as const };
+    const r = genbin(m, [{ ring: centred(fx.pocket_mm), depth: p.depth }], nx, ny, { ...q, depth: 0 });
+    const plain = genbin(m, centred(fx.pocket_mm), nx, ny, q);
+    expect(r.positions).toEqual(plain.positions);
+    expect(r.indices).toEqual(plain.indices);
+    expect(Math.abs(r.volume - UNSIMPLIFIED_VOLUME[tool]) / UNSIMPLIFIED_VOLUME[tool]).toBeLessThan(5e-5);
     expect(r.effectiveDepths).toHaveLength(1);
     expect(r.effectiveDepths[0]).toBeCloseTo(Math.min(p.depth, maxDepth(p.u, { holes: 'both' })), 9);
   });

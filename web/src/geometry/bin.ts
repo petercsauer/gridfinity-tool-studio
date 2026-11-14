@@ -20,6 +20,8 @@ const LEAD = 1.4;
 /** Layers in each stepped round-over, and segments per circle for its offsets (shapely quad_segs=24). */
 const STEPS = 16;
 const ROUND_SEGMENTS = 96;
+/** Each round-over layer is simplified to this (mm) before it is extruded. */
+const LAYER_TOL = 0.02;
 /** Segments per circle of the rounded-rectangle corners and the base holes. */
 const RECT_SEGMENTS = 48;
 const HOLE_SEGMENTS = 48;
@@ -190,7 +192,8 @@ export function genbinManifold(
         const own: Manifold[] = [slab(pk, floorTop + fb, top + 1)];
         /** A layer of the pocket offset by `delta` (largest part, outer contour only) from za to zb. */
         const ring = (delta: number, za: number, zb: number): void => {
-          const off = s.keep(pk.offset(delta, 'Round', 2, ROUND_SEGMENTS));
+          // simplified to 0.02 mm: a quarter of the time and half the triangles, no visible change
+          const off = s.keep(s.keep(pk.offset(delta, 'Round', 2, ROUND_SEGMENTS)).simplify(LAYER_TOL));
           let best: CrossSection | undefined;
           for (const part of off.decompose()) {
             s.keep(part);

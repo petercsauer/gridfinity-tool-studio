@@ -297,9 +297,13 @@ describe('kit build performance', () => {
     },
   };
 
-  it('builds 12 placed parts, each with its own depth, in under 5 s and frees everything', async () => {
-    // without round-overs: their stepped layers cost each pocket as much as a single tool's bin (seconds)
-    const params = { ...DEFAULTS, tool: 'twelve', sym: false, u: 5, slotR: 5, slotOver: 2, fillet: 0 };
+  // under 5 s here, under 20 s on CI's runners (about 2.5x slower; this build took 26 s here before the
+  // round-over layers were simplified, so either bound still catches that coming back)
+  const LIMIT = process.env.CI ? 20_000 : 5_000;
+
+  it('builds 12 placed parts, each with its own depth, in a few seconds and frees everything', async () => {
+    // with the default top round-over, the costliest part of each pocket
+    const params = { ...DEFAULTS, tool: 'twelve', sym: false, u: 5, slotR: 5, slotOver: 2 };
     const own = settingsFromParams(params);
     // six columns of two rows
     const layout: Layout = {
@@ -312,7 +316,7 @@ describe('kit build performance', () => {
     const r = await build(params, kd, layout);
     const ms = performance.now() - t0;
     expect(r.effectiveDepths).toEqual(layout.placements.map((q) => q.depth));
-    expect(ms).toBeLessThan(5000);
+    expect(ms).toBeLessThan(LIMIT);
     expect(liveObjects()).toBe(0);
   }, 120_000);
 });
