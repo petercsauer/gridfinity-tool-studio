@@ -455,7 +455,9 @@ test('layout persists: a moved upload keeps its placement after a reload', async
   await page.locator('#consentYes').click();
   await expect(page.locator('#upMsg')).toHaveText(/Added “stripper”/, { timeout: 200_000 });
   const id = await page.locator('#tool').inputValue();
-  await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 }); // its outline is in, so the pane is chosen
+  // built (the button reads Export STL, not Updating…), so its outline is in and the Layout pane shows it: until
+  // then the pane still shows the previous tool, and edits go to that tool
+  await expect(page.locator('#exp')).toHaveText(/Export STL/, { timeout: 60_000 });
   await page.locator('#tabLayout').click();
   await page.locator('#partList [role=option]').first().click();
   await page.keyboard.press('Shift+ArrowRight');
