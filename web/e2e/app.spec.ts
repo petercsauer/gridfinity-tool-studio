@@ -464,7 +464,7 @@ test('layout persists: a moved upload keeps its placement after a reload', async
   await expect.poll(async () => (await sentPlacement(page))?.rot).toBe(90);
   const moved = (await sentPlacement(page))!;
   const stored = () => page.evaluate(() => new Promise<{ x: number; rot: number } | null>((resolve) => {
-    const rq = indexedDB.open('gridfinity-tool-studio');
+    const rq = indexedDB.open('gridfinity-tool-studio-kits');
     rq.onsuccess = () => {
       const all = rq.result.transaction('uploads').objectStore('uploads').getAll();
       all.onsuccess = () => {
