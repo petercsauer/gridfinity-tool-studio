@@ -831,7 +831,13 @@ test('outline: fit, edit points, undo and reset to the trace', async ({ page }) 
   let pts = await outlinePoints(page);
   await page.mouse.click(pts[2]!.x, pts[2]!.y);
   await expect(page.locator('#outlineRemove')).toBeEnabled();
-  await page.keyboard.press('Delete');
+  await page.keyboard.press('d');
+  await expect(page.locator('#outlineCount')).toHaveText(`${n0 - 1} points`);
+  // A adds one after the selected point (the one now in its place), and undo takes it away again
+  await page.mouse.click(pts[2]!.x, pts[2]!.y);
+  await page.keyboard.press('a');
+  await expect(page.locator('#outlineCount')).toHaveText(`${n0} points`);
+  await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('#outlineCount')).toHaveText(`${n0 - 1} points`);
   await expect.poll(async () => (await sentPath(page))?.anchors.length).toBe(n0 - 1);
   await expect(page.locator('#sym')).toBeDisabled();
@@ -872,13 +878,17 @@ test('outline: fit, edit points, undo and reset to the trace', async ({ page }) 
   await expect.poll(() => pointCount(page)).toBe(n1 + 1);
   await expect.poll(async () => (await sentPath(page))?.anchors.length).toBe(n1 + 1);
 
-  // the Detail slider refits from the trace: coarser means fewer points
+  // minus refits with less detail (the slider moves with it), then the slider all the way: fewer points
+  const n2 = await pointCount(page);
+  await page.locator('#outlineCanvas').focus();
+  await page.keyboard.press('-');
+  await expect(page.locator('#outlineDetail')).toHaveValue('0.35');
   await page.locator('#outlineDetail').evaluate((el: HTMLInputElement) => {
     el.value = '1';
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  await expect.poll(() => pointCount(page)).toBeLessThan(n0 - 1);
+  await expect.poll(() => pointCount(page)).toBeLessThan(n2);
   await expect.poll(async () => (await sentPath(page))?.anchors.length).toBe(await pointCount(page));
 
   // back to the trace: no path is sent, and Symmetric applies again

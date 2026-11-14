@@ -44,7 +44,7 @@ Lay a kit's parts on the sheet together (say a meter and its probes), a finger's
 photo: each part is traced on its own and gets its own pocket in one bin. The **Layout** pane shows the bin from
 above. Drag a part to move it, or its round handle to turn it; the part's axis snaps to 0° and 90° (hold Alt
 or Option to turn freely). With the canvas or the part list focused, arrow keys move the selected part (Shift
-for 10 mm), `[` and `]` turn it 90°, Delete hides it (restore it under Hidden parts), and Cmd/Ctrl+Z undoes.
+for 10 mm), `[` and `]` turn it 90°, D or Delete hides it (restore it under Hidden parts), and Cmd/Ctrl+Z undoes.
 Select a part (in the Layout pane, its part list or the Trace pane) and Symmetric tool, Clearance, Rotation,
 Depth and the finger slot apply to it alone; with none selected they apply to all of them.
 The bin grows to fit the parts, or turn off **Auto size** to fix its size in cells. Overlapping pockets merge
@@ -59,7 +59,9 @@ handles; double-click a point to switch it between corner and smooth, or the out
 removes a point and refits that stretch to the trace, **Straighten** (S) makes a segment straight, **Round
 corner** (R) rounds a corner to the radius beside it, and **Detail** refits the whole outline with fewer or more
 points. Hold Alt or Option while dragging to stop straight edges snapping level, or to break a smooth point's
-handles apart. An edit that would make the outline cross itself is undone when let go. The edited outline is
+handles apart. Keys (with the outline focused): **D** delete, **A** add a point, **C** corner/smooth, **S**
+straighten, **R** round, **−**/**+** less or more detail, Tab to step through points, arrows to nudge (Shift for
+1 mm), Cmd/Ctrl+Z to undo. An edit that would make the outline cross itself is undone when let go. The edited outline is
 used for the pocket and the exports, saved with the layout, and undone with Cmd/Ctrl+Z; **Reset to trace** goes
 back to the traced one (and lets Symmetric tool apply again).
 

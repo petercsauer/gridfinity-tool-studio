@@ -197,6 +197,19 @@ export class OutlineView {
     this.commit(next, used < r - 0.005 ? `Point ${i + 1} rounded to ${used} mm, as much as its sides allow.` : `Point ${i + 1} rounded to ${r} mm.`);
   }
 
+  /** A point added on the selected segment where it was picked, or halfway along the one after the selected
+   * point; the shape doesn't change. */
+  private addPoint(): void {
+    const sel = this.selected;
+    if (!sel || !this.path) {
+      this.say('Pick a point or a stretch of the outline first, or double-click the outline where a point should go.');
+      return;
+    }
+    const { path, index } = insertAnchor(this.path, sel.i, sel.kind === 'line' ? sel.t : 0.5);
+    this.selected = { kind: 'point', i: index };
+    this.commit(path, `Point added: ${path.anchors.length} points.`);
+  }
+
   private removeSelected(): void {
     const i = this.pointIndex();
     if (i === null || !this.path || !this.kit) return;
@@ -237,8 +250,18 @@ export class OutlineView {
       const [dx, dy] = { ArrowLeft: [-d, 0], ArrowRight: [d, 0], ArrowUp: [0, -d], ArrowDown: [0, d] }[e.key] ?? [0, 0];
       const a = p.anchors[i]!.p;
       this.commit(moveAnchor(p, i, [a[0] + dx!, a[1] + dy!], false), `Point ${i + 1} moved.`);
-    } else if ((e.key === 'Delete' || e.key === 'Backspace') && i !== null) {
+    } else if ((e.key === 'Delete' || e.key === 'Backspace' || e.key === 'd' || e.key === 'D') && i !== null) {
       this.removeSelected();
+    } else if (e.key === 'a' || e.key === 'A') {
+      this.addPoint();
+    } else if (e.key === '-' || e.key === '_' || e.key === '=' || e.key === '+') {
+      // less detail (a looser fit, fewer points) or more
+      const el = this.ui.detail;
+      const step = +el.step || 0.05;
+      const v = Math.min(+el.max, Math.max(+el.min, +el.value + (e.key === '-' || e.key === '_' ? step : -step)));
+      if (v === +el.value) return;
+      el.value = String(+v.toFixed(2));
+      this.detail(true);
     } else if (e.key === 'c' || e.key === 'C') {
       this.toggleSelected();
     } else if (e.key === 's' || e.key === 'S') {
@@ -381,7 +404,7 @@ export class OutlineView {
     const pts: Ring = [...kit.part.traced, ...kit.part.pocket, ...path.anchors.map((a) => a.p)];
     const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-    const pad = 36 * dpr, bottom = 64 * dpr, top = 96 * dpr;
+    const pad = 36 * dpr, bottom = 112 * dpr, top = 96 * dpr;
     if (!this.drag) {
       const s = Math.max(1e-6, Math.min((W - 2 * pad) / (x1 - x0 || 1), (H - top - bottom) / (y1 - y0 || 1)));
       this.xf = { s, ox: (W - (x1 - x0) * s) / 2 - x0 * s, oy: top + (H - top - bottom - (y1 - y0) * s) / 2 - y0 * s, dpr };

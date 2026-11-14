@@ -373,7 +373,7 @@ export class LayoutView {
     } else if (e.key === '[' || e.key === ']') {
       const c = this.pivotOf(id);
       this.edit(id, (pl) => turnAbout(pl, c, normalizeDeg(pl.rot + (e.key === ']' ? 90 : -90))));
-    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    } else if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'd' || e.key === 'D') {
       if (vis.length < 2) {
         this.say('A bin needs at least one part.');
       } else {

@@ -315,6 +315,13 @@ section.view.outline{background:var(--bg-canvas)}
   background:var(--bg-field);box-shadow:var(--shadow-pill);font:var(--t-subhead);color:var(--label-2);white-space:nowrap}
 .outline-detail input{width:120px}
 .outline-count:empty{display:none}
+.outline-keys{position:absolute;left:8px;bottom:44px;max-width:calc(100% - 16px);box-sizing:border-box;margin:0;padding:3px 8px;
+  border-radius:10px;background:color-mix(in srgb,var(--bg-canvas) 88%,transparent);z-index:5;pointer-events:none;
+  font:var(--t-footnote);color:var(--label-2);line-height:20px}
+.outline-keys kbd{display:inline-block;min-width:18px;padding:0 4px;border-radius:5px;background:var(--bg-field);
+  box-shadow:var(--shadow-pill);text-align:center}
+.outline-keys kbd{font:inherit;font-weight:600;color:var(--label);margin:0 2px 0 8px}
+.outline-keys kbd:first-child{margin-left:0}
 .outline-bar .layout-status{padding:4px 10px;border-radius:var(--r-capsule);background:var(--bg-field)}
 .outline-bar .layout-status:empty{display:none}
 .outline-bar .btn-pair{pointer-events:auto}
