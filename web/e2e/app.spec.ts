@@ -1,5 +1,5 @@
-// End-to-end: presets, the 2D trace, the 3D build and STL export, and the upload flow (model consent,
-// tracing, persistence across reloads, removal, errors). The 88 MB model and the onnxruntime wasm are served
+// End-to-end: presets, the 2D trace, the layout editor, the 3D build and STL export, and the upload flow
+// (model consent, tracing, persistence across reloads, removal, errors). The 88 MB model and the onnxruntime wasm are served
 // from local copies (web/.cache and node_modules) instead of Hugging Face and jsDelivr.
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -73,8 +73,8 @@ function plainPng(w = 64, h = 48): Buffer {
 }
 
 /** Load the app and wait until the first preset's trace and bin are shown. */
-async function open(page: Page): Promise<void> {
-  await page.goto('./');
+async function open(page: Page, url = './'): Promise<void> {
+  await page.goto(url);
   await expect(page.locator('#tool > option')).toHaveCount(2);
   await expect(page.locator('#cells')).not.toBeEmpty();
   await expect(page.locator('.trace')).toHaveClass(/ready/);
@@ -326,6 +326,168 @@ test('the pocket and tool sizes show on the trace and under the pocket settings'
   await expect.poll(async () => (await nums())[0]).toBeCloseTo(pw! + 3, 0);
 });
 
+/** Record the layout sent with every outline request (null when the kit's initial layout is used). */
+async function recordOutlines(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { outlines: unknown[] };
+    w.outlines = [];
+    const post = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (this: Worker, msg: { kind?: string; layout?: unknown }, ...rest: never[]) {
+      if (msg?.kind === 'outline') w.outlines.push(msg.layout ?? null);
+      return (post as (...a: unknown[]) => void).call(this, msg, ...rest);
+    };
+  });
+}
+type SentLayout = { placements: { x: number; y: number; rot: number }[] } | null;
+const lastLayout = (page: Page) => page.evaluate(() => (window as unknown as { outlines: SentLayout[] }).outlines.at(-1) ?? null);
+const sentPlacement = async (page: Page) => (await lastLayout(page))?.placements[0];
+
+/** Click around the middle of the layout until a part is hit; returns that point (page px). */
+async function grabPart(page: Page): Promise<{ x: number; y: number }> {
+  const box = (await page.locator('#plan').boundingBox())!;
+  const selected = page.locator('#partList [aria-selected=true]');
+  for (let r = 0; r < 240; r += 10) {
+    for (let a = 0; a < 360; a += r ? 20 : 360) {
+      const x = box.x + box.width / 2 + r * Math.cos((a * Math.PI) / 180);
+      const y = box.y + box.height / 2 + r * Math.sin((a * Math.PI) / 180);
+      await page.mouse.click(x, y);
+      if (await selected.count()) return { x, y };
+    }
+  }
+  throw new Error('no part under the layout centre');
+}
+
+/** Hold the selected part's rotation handle a little off its axis (still snapped), screenshot, and let go. */
+async function shootSnapped(page: Page, name: string): Promise<void> {
+  const box = (await page.locator('#plan').boundingBox())!;
+  const [hx, hy] = (await page.locator('#plan').getAttribute('data-handle'))!.split(' ').map(Number);
+  const s = Number(await page.locator('#plan').getAttribute('data-scale'));
+  await page.mouse.move(box.x + hx!, box.y + hy!);
+  await page.mouse.down();
+  await page.mouse.move(box.x + hx! + 0.3 * s, box.y + hy!, { steps: 3 }); // about 1.5° at 12 mm or more
+  await page.screenshot({ path: test.info().outputPath(name) });
+  await page.mouse.up();
+}
+
+test('layout: drag and snap', async ({ page }) => {
+  const errors = pageErrors(page);
+  await recordOutlines(page);
+  await open(page);
+  // a single tool opens in Trace; its layout is the initial one until it is edited
+  await expect(page.locator('#tracePane')).toBeVisible();
+  await expect(page.locator('#layoutPane')).toBeHidden();
+  expect(await lastLayout(page)).toBeNull();
+  await page.locator('#tabLayout').click();
+  await expect(page.locator('#tabLayout')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#partList [role=option]')).toHaveText(['Part 1']);
+
+  const s = Number(await page.locator('#plan').getAttribute('data-scale'));
+  expect(s).toBeGreaterThan(0);
+  const at = await grabPart(page);
+  await expect(page.locator('#layoutStatus')).toHaveText(/^Part 1 at 0, 0 mm, 0°$/);
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 20 * s, at.y, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(async () => (await sentPlacement(page))?.x).toBeGreaterThan(19);
+  const pl = (await sentPlacement(page))!;
+  expect(pl.x).toBeLessThan(21);
+  expect(Math.abs(pl.y)).toBeLessThan(1);
+  expect(pl.rot).toBe(0);
+
+  // ] turns it 90° (the bin turns with it), and undo turns it back
+  const cells = await page.locator('#cells').textContent();
+  const [cx, cy] = cells!.split('×');
+  await expect(page.locator('#plan')).toBeFocused();
+  await page.keyboard.press(']');
+  await expect.poll(async () => (await sentPlacement(page))?.rot).toBe(90);
+  await expect(page.locator('#cells')).toHaveText(`${cy}×${cx}`);
+  await expect(page.locator('#rotV')).toHaveText('90°');
+  await expect(page.locator('#layoutStatus')).toContainText('90°');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(async () => (await sentPlacement(page))?.rot).toBe(0);
+  await expect(page.locator('#cells')).toHaveText(cells!);
+  expect((await sentPlacement(page))!.x).toBeCloseTo(pl.x, 6);
+  await expect(page.locator('#exp')).toHaveText(/Export STL/, { timeout: 60_000 });
+  await expect(page.locator('#exp')).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
+test('layout: light and dark', async ({ page }) => {
+  for (const theme of ['light', 'dark']) {
+    await open(page, `./?theme=${theme}`);
+    await page.locator('#tool').selectOption('studfinder');
+    await expect(page.locator('#cells')).toHaveText('4×5');
+    await page.locator('#tabLayout').click();
+    await page.locator('#partList [role=option]').first().click();
+    await expect(page.locator('#plan')).not.toHaveAttribute('data-handle', '');
+    await shootSnapped(page, `layout-${theme}.png`);
+  }
+});
+
+test('layout: keys and the part list move a part without dragging', async ({ page }) => {
+  await recordOutlines(page);
+  await open(page);
+  await page.locator('#tabLayout').click();
+  await page.locator('#partList [role=option]').first().click();
+  await expect(page.locator('#partList [role=option]').first()).toBeFocused();
+  await page.keyboard.press('Shift+ArrowUp');
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await sentPlacement(page))?.y).toBe(10);
+  expect((await sentPlacement(page))!.x).toBe(-1);
+  await expect(page.locator('#layoutStatus')).toHaveText('Part 1 at -1, 10 mm, 0°');
+  // the last part can't be removed; Escape clears the selection
+  await page.keyboard.press('Delete');
+  await expect(page.locator('#layoutStatus')).toHaveText(/at least one part/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#partList [aria-selected=true]')).toHaveCount(0);
+  // the slider turns a laid-out single tool
+  await setSlider(page, 'rot', 45);
+  await expect.poll(async () => (await sentPlacement(page))?.rot).toBe(45);
+});
+
+test('layout persists: a moved upload keeps its placement after a reload', async ({ page, context }) => {
+  test.skip(!existsSync(MODEL), 'Model not cached: run the unit tests once (npm test) to download web/.cache/model_fp16.onnx');
+  await offline(context);
+  await recordOutlines(page);
+  await open(page);
+  await page.locator('#upFile').setInputFiles(STRIPPER);
+  await page.locator('#consentYes').click();
+  await expect(page.locator('#upMsg')).toHaveText(/Added “stripper”/, { timeout: 200_000 });
+  const id = await page.locator('#tool').inputValue();
+  // built (the button reads Export STL, not Updating…), so its outline is in and the Layout pane shows it: until
+  // then the pane still shows the previous tool, and edits go to that tool
+  await expect(page.locator('#exp')).toHaveText(/Export STL/, { timeout: 60_000 });
+  await page.locator('#tabLayout').click();
+  await page.locator('#partList [role=option]').first().click();
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press(']');
+  await expect.poll(async () => (await sentPlacement(page))?.rot).toBe(90);
+  const moved = (await sentPlacement(page))!;
+  const stored = () => page.evaluate(() => new Promise<{ x: number; rot: number } | null>((resolve) => {
+    const rq = indexedDB.open('gridfinity-tool-studio-kits');
+    rq.onsuccess = () => {
+      const all = rq.result.transaction('uploads').objectStore('uploads').getAll();
+      all.onsuccess = () => {
+        resolve(all.result[0]?.layout?.placements[0] ?? null);
+        rq.result.close();
+      };
+    };
+  }));
+  await expect.poll(async () => (await stored())?.rot).toBe(90);
+
+  await page.reload();
+  await open(page);
+  await page.locator('#tool').selectOption(id);
+  await expect.poll(async () => (await sentPlacement(page))?.rot).toBe(90);
+  const back = (await sentPlacement(page))!;
+  expect(back.x).toBeCloseTo(moved.x, 6);
+  expect(back.y).toBeCloseTo(moved.y, 6);
+  await expect(page.locator('#rotV')).toHaveText('90°');
+  await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+});
+
 test('an upload saved by the single-tool version is carried over, and left for that version', async ({ page }) => {
   const errors = pageErrors(page);
   await open(page);
@@ -378,5 +540,29 @@ test('an upload saved by the single-tool version is carried over, and left for t
   await page.reload();
   await open(page);
   await expect(page.locator('#tool optgroup[label="Your uploads"] option')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('a pane picked before the tool\'s outline comes back stays picked', async ({ page }) => {
+  const errors = pageErrors(page);
+  // outline answers from the worker arrive 1.5 s late (a slow machine)
+  await page.addInitScript(() => {
+    const add = Worker.prototype.addEventListener;
+    Worker.prototype.addEventListener = function (this: Worker, type: string, fn: EventListenerOrEventListenerObject, ...rest: never[]) {
+      if (type !== 'message' || typeof fn !== 'function') return add.call(this, type, fn, ...rest);
+      return add.call(this, type, (e: Event) => {
+        const kind = (e as MessageEvent<{ kind?: string; ok?: boolean }>).data?.kind;
+        if (kind === 'outline') setTimeout(() => fn.call(this, e), 1500);
+        else fn.call(this, e);
+      }, ...rest);
+    } as typeof Worker.prototype.addEventListener;
+  });
+  await open(page);
+  // a single tool opens in Trace once its outline is in; picking Layout before then holds
+  await page.locator('#tool').selectOption('studfinder');
+  await page.locator('#tabLayout').click();
+  await page.waitForTimeout(3000);
+  await expect(page.locator('#layoutPane')).toBeVisible();
+  await expect(page.locator('#tabLayout')).toHaveAttribute('aria-selected', 'true');
   expect(errors).toEqual([]);
 });

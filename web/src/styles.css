@@ -268,7 +268,29 @@ section.view{position:relative;overflow:hidden;min-width:0;min-height:0}
 section.view.trace{background:var(--bg-canvas)}
 /* farthest-side: the gradient reaches --bg-3d-edge (= canvas) at the pane's left/right edges, so no seam */
 section.view.preview{background:radial-gradient(ellipse farthest-side at 50% 45%, var(--bg-3d-top) 0%, var(--bg-3d-mid) 50%, var(--bg-3d-edge) 92%)}
-#flat, #three{position:absolute;inset:0;width:100%;height:100%;display:block}
+#flat, #three, #plan{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+/* ---- flat pane: Layout and Trace share it, switched by a glass capsule ---- */
+.pane-2d{position:relative;min-width:0;min-height:0}
+.pane-2d > section.view{position:absolute;inset:0}
+.pane-2d > section.view[hidden]{display:none}
+section.view.layout{background:var(--bg-canvas)}
+.pane-switch.glass{position:absolute;top:8px;left:8px;height:36px;padding:4px;display:flex;gap:2px;z-index:6}
+.pane-switch button{height:28px;padding:0 12px;border:0;border-radius:14px;background:none;color:var(--label-2);
+  font:500 11px/14px var(--font);transition:background var(--dur-fast) var(--ease-ca)}
+.pane-switch button:hover:not([aria-selected=true]){background:var(--fill-3)}
+.pane-switch button[aria-selected=true]{background:var(--bg-field);color:var(--label);box-shadow:var(--shadow-pill)}
+#plan{touch-action:none}
+#plan:focus-visible{outline-offset:-3px}
+.layout-bar{position:absolute;left:8px;right:8px;bottom:8px;display:flex;align-items:center;gap:12px;z-index:5;pointer-events:none}
+.part-list{display:flex;gap:2px;margin:0;padding:2px;list-style:none;border-radius:var(--r-capsule);background:var(--fill);
+  max-width:60%;overflow-x:auto;scrollbar-width:none;pointer-events:auto;flex:none}
+.part-list li{height:24px;padding:0 11px;display:grid;place-items:center;border-radius:var(--r-capsule);white-space:nowrap;
+  font:var(--t-subhead);font-weight:600;color:var(--label-2)}
+.part-list li:hover:not([aria-selected=true]){background:var(--fill-pressed)}
+.part-list li[aria-selected=true]{background:var(--bg-field);color:var(--label);box-shadow:var(--shadow-pill)}
+.part-list li:focus-visible{outline-offset:-2px}
+.layout-status{font:var(--t-subhead);color:var(--label-2);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .caption{position:absolute;top:19px;left:16px;font:500 11px/14px var(--font);color:var(--label-2);z-index:5;pointer-events:none}
 
 /* ---- legend chip ---- */

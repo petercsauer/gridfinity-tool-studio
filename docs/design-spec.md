@@ -11,7 +11,7 @@ This document describes the visual design of the Gridfinity Tool Studio browser 
 ## 1. Design intent and information architecture
 
 ### Intent
-The window should feel like a native Mac pro tool: the tool photo and the 3D bin are the content, run edge to edge, and supply all the color on screen. Chrome is a quiet, monochrome functional layer on top. Liquid Glass is limited to three things: the trailing inspector, one small floating control capsule over the 3D view, and the trace legend chip. The inspector is a dense, System Settings-style grouped form with 13 px SF labels, tabular values with units, white lozenge slider thumbs and switches. One tinted action, **Export STL**, sits top right. Motion is plain springs, with no bounce except a press bounce on glass buttons, and the preview updates instantly while sliders move.
+The window should feel like a native Mac pro tool: the tool photo and the 3D bin are the content, run edge to edge, and supply all the color on screen. Chrome is a quiet, monochrome functional layer on top. Liquid Glass is limited to four things: the trailing inspector, one small floating control capsule over the 3D view, the Layout/Trace switch, and the trace legend chip. The inspector is a dense, System Settings-style grouped form with 13 px SF labels, tabular values with units, white lozenge slider thumbs and switches. One tinted action, **Export STL**, sits top right. Motion is plain springs, with no bounce except a press bounce on glass buttons, and the preview updates instantly while sliders move.
 
 ### Window layout (the browser viewport is the window; no fake traffic lights or title bar)
 
@@ -36,7 +36,8 @@ The window should feel like a native Mac pro tool: the tool photo and the 3D bin
   3. **Finger slot:** a **Grab slot** switch row (`#slotOn`), Diameter (`#slotD`, mm) and Position (`#slotFrac`, a unitless fraction; see 3.3). Dependent rows dim to 50% when the switch is off but stay operable.
   4. **Bin:** Height (`#u`, U, with 8 tick dots) and Depth (`#depth`, mm).
   5. **Edges:** Top fillet (`#fillet`, mm) and Bottom round (`#bfillet`, mm).
-- **Canvases:** the content column below the toolbar band splits **side by side** into two equal panes, with a 1 px hairline between them (the thin split-view divider). Trace is on the left and 3D on the right. Below 1100 px of viewport width the panes **stack** (trace on top), with the same hairline running horizontally. Both panes are edge-to-edge content: no card, no border and no radius. Each pane has a tiny sentence-case caption at its top left ("Trace" and "Preview"; Subheadline 11 px, weight 500, `--label-2`, plain text with no glass).
+- **Canvases:** the content column below the toolbar band splits **side by side** into two equal panes, with a 1 px hairline between them (the thin split-view divider). Trace is on the left and 3D on the right. Below 1100 px of viewport width the panes **stack** (trace on top), with the same hairline running horizontally. Both panes are edge-to-edge content: no card, no border and no radius. The 3D pane has a tiny sentence-case caption at its top left ("Preview"; Subheadline 11 px, weight 500, `--label-2`, plain text with no glass). The left pane's caption is a glass capsule switching it between **Layout** and **Trace** (see 3.16).
+  - **Layout pane:** a top-down view of the bin on `--bg-canvas`, where a kit's parts are moved and turned. Kits with several parts open here.
   - **Trace pane:** a neutral `--bg-canvas` surface. The photo is aspect-fit and is the only colorful thing. The legend is a small regular-glass chip at bottom left with a 12 px inset.
   - **3D pane:** a Quick Look style seamless gradient backdrop (a CSS gradient behind a transparent WebGL canvas). A regular-glass capsule floats at top right with a 12 px inset. It holds `#spin` (an unlabeled spinner with a short "Updating" label, delayed in) and `#gen` (an icon button, `arrow.clockwise`, with the tooltip "Regenerate the 3D preview").
 - **Primary action:** `#exp` **Export STL** is the only tinted control in the window. `#gen` is demoted to a secondary icon, because the preview already regenerates on every change (`changed()` → `dGenerate`).
@@ -271,7 +272,7 @@ html.inactive input[type=range]{ --fill-color: var(--label-3) }                 
 
 ## 3. Component specs
 
-### 3.0 Glass recipe (`.glass`, used only on: `.inspector`, `.viewer-capsule`, `.legend`)
+### 3.0 Glass recipe (`.glass`, used only on: `.inspector`, `.viewer-capsule`, `.legend`, `.pane-switch`)
 
 ```css
 .glass{ -webkit-backdrop-filter:var(--glass-sm-filter); backdrop-filter:var(--glass-sm-filter);
@@ -429,6 +430,12 @@ Small presentation-only listeners, kept separate from the app logic:
 3. `.inspector-body.scrolled` toggled on `scroll` (`scrollTop>0`).
 4. `--mx`/`--my` set on `pointermove` for `.glass.interactive`.
 5. The color-scheme `change` listener for the 3D material and ground colors and for `drawFlat` (it must live inside the main module to reach `mat` and `scene`).
+
+### 3.16 Layout pane (`section.view.layout`, `web/src/layout-view.ts`)
+- **Switch** (`.pane-switch.glass`, `role=tablist`): a 36 px regular-glass capsule at top left with an 8 px inset, holding two 28 px tabs ("Layout", "Trace"; 11 px, weight 500). The selected tab is a `--bg-field` pill with `--shadow-pill`; the other is `--label-2` text. It sits over `--bg-canvas`, never over the WebGL canvas.
+- **Canvas** (`#plan`, `tabindex=0`, `touch-action:none`): the bin as a `--bg-window` rounded rect with a soft shadow and a `--label-3` hairline, cell lines (42 mm, or 21 mm with half-grid feet) in `--separator`, and the area a pocket may use as a dashed `--label-3` inset. Pockets and tools are drawn as on the trace (3.13) with a `--bg-canvas` halo. The selected part has a stronger pocket fill, its axis dashed in `--trace-axis`, and a 7 px `--thumb` rotation handle 12 mm beyond it on a `--label-2` stem. While the axis is snapped to 0/90°, a solid `--trace-axis` guide runs across the bin.
+- **Part list** (`#partList`, `role=listbox`, roving tabindex) and **status** (`#layoutStatus`, `aria-live=polite`) sit at bottom left: the list uses the `.sheet-seg` look (a `--fill` capsule of 24 px pills, the selected one a `--bg-field` pill); the status is Subheadline `--label-2`. No glass, and no tinted controls.
+- **Keys** on the canvas and the list: Tab/Shift+Tab pick a part (then move on, no trap), arrows move it 1 mm (Shift 10 mm), `[`/`]` turn it 90°, Delete removes it, Escape deselects, Cmd/Ctrl+Z undoes and Shift+Cmd/Ctrl+Z redoes.
 
 ---
 
