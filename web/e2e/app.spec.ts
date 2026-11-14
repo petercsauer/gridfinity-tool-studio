@@ -879,3 +879,27 @@ test('an upload saved by the single-tool version is carried over, and left for t
   await expect(page.locator('#tool optgroup[label="Your uploads"] option')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('a pane picked before the tool\'s outline comes back stays picked', async ({ page }) => {
+  const errors = pageErrors(page);
+  // outline answers from the worker arrive 1.5 s late (a slow machine)
+  await page.addInitScript(() => {
+    const add = Worker.prototype.addEventListener;
+    Worker.prototype.addEventListener = function (this: Worker, type: string, fn: EventListenerOrEventListenerObject, ...rest: never[]) {
+      if (type !== 'message' || typeof fn !== 'function') return add.call(this, type, fn, ...rest);
+      return add.call(this, type, (e: Event) => {
+        const kind = (e as MessageEvent<{ kind?: string; ok?: boolean }>).data?.kind;
+        if (kind === 'outline') setTimeout(() => fn.call(this, e), 1500);
+        else fn.call(this, e);
+      }, ...rest);
+    } as typeof Worker.prototype.addEventListener;
+  });
+  await open(page);
+  // a single tool opens in Trace once its outline is in; picking Layout before then holds
+  await page.locator('#tool').selectOption('studfinder');
+  await page.locator('#tabLayout').click();
+  await page.waitForTimeout(3000);
+  await expect(page.locator('#layoutPane')).toBeVisible();
+  await expect(page.locator('#tabLayout')).toHaveAttribute('aria-selected', 'true');
+  expect(errors).toEqual([]);
+});
