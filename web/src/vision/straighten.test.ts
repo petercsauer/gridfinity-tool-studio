@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { rotate, signedArea, type Ring, type Vec2 } from '../geometry/pocket';
+import { presetFixture } from '../test/fixtures';
 import { resample } from './smooth';
 import { straighten } from './straighten';
 
@@ -133,5 +134,56 @@ describe('straighten', () => {
     const S = straighten(traced);
     expect(Math.sign(signedArea(S))).toBe(Math.sign(signedArea(traced)));
     expect(Math.abs(signedArea(S))).toBeGreaterThanOrEqual(Math.abs(signedArea(traced)) - 1e-6);
+  });
+});
+
+describe('straighten: review cases', () => {
+  /** A lens of two arcs of radius R meeting 60 mm apart, wobbled by `amp` mm. */
+  function noisyLens(R: number, amp: number): Ring {
+    const half = Math.asin(30 / R), lens: Vec2[] = [];
+    for (let k = 0; k <= 200; k++) {
+      const a = -half + (2 * half * k) / 200;
+      lens.push([R * Math.sin(a), R * Math.cos(a) - R * Math.cos(half)]);
+    }
+    for (let k = 0; k <= 200; k++) {
+      const a = half - (2 * half * k) / 200;
+      lens.push([R * Math.sin(a), -(R * Math.cos(a) - R * Math.cos(half))]);
+    }
+    const L = resample(lens, 720);
+    return wobble([...L.slice(0, 719), L[0]!], amp);
+  }
+  const moved = (A: Ring, B: Ring) => Math.max(...A.map((p, k) => Math.hypot(p[0] - B[k]![0], p[1] - B[k]![1])));
+
+  it.each([[100, 0.03], [100, 0.15], [150, 0.03], [150, 0.15], [250, 0.03], [250, 0.15]])(
+    'leaves a noisy %i mm curve (wobble %f mm) curved', (R, amp) => {
+      const L = noisyLens(R, amp);
+      expect(moved(L, straighten(L))).toBeLessThan(1e-9);
+    });
+
+  it.each([0.5, 1, 2])('straightens all four sides of a box with %f mm corners', (r) => {
+    const traced = wobble(roundedRect(60, 100, r), 0.3);
+    const S = straighten(traced);
+    for (const [x0] of [[-30], [30]] as const) {
+      const xs = side(S, x0, -40, 40).map((p) => p[0]);
+      expect(xs.length).toBeGreaterThan(50);
+      expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(1e-9);
+    }
+    for (const y0 of [-50, 50]) {
+      const ys = S.filter(([x, y]) => Math.abs(y - y0) < 2 && Math.abs(x) < 20).map((p) => p[1]);
+      expect(ys.length).toBeGreaterThan(30);
+      expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(1e-9);
+    }
+  });
+
+  it.each([0.3, 0.5, 1])('keeps every traced point inside at %f mm corners', (r) => {
+    const traced = wobble(roundedRect(60, 100, r), 0.3);
+    const S = straighten(traced);
+    for (const p of traced) expect(inside(S, p, 1e-6)).toBe(true);
+  });
+
+  it('leaves the fixture pliers\' curved handles nearly as traced', () => {
+    // the needle-nose's gentle curves stay within half a millimetre (its straight stretches may move more)
+    const P = presetFixture('needlenose').outline_mm;
+    expect(moved(P, straighten(P))).toBeLessThan(0.6);
   });
 });

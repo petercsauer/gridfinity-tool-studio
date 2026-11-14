@@ -12,11 +12,12 @@ export interface StraightenOptions {
   minLength: number;
   /** Below this deviation (mm) a run is straight however its points scatter. */
   flat: number;
-  /** A run may also bow this gently: by up to length² / (8 * minRadius) mm, i.e. as an arc of this radius (mm).
-   * Real curves are much tighter; this catches a straight edge the mask bends slightly (a glare on metal). */
+  /** A run counts as straight if the curve through it (a parabola fitted to its deviations, so noise averages
+   * out) is no tighter than an arc of this radius (mm): real curves are much tighter; this lets through a straight
+   * edge the mask bends slightly (a glare on metal, the camera's perspective on a tall part). */
   minRadius: number;
-  /** How many times the points of a noisy straight run cross its line at least; a curve crosses about twice. */
-  crossings: number;
+  /** A run doesn't grow past a point where the outline turns more than this (degrees, over 1.5 mm either side). */
+  cornerDeg: number;
   /** Lines within this many degrees of the x or y axis are made exactly parallel to it. */
   snapDeg: number;
   /** Length (mm) at each end of a run blended back into the outline, so corners keep their shape. */
@@ -27,7 +28,7 @@ export interface StraightenOptions {
 const GROW = 8;
 
 export const STRAIGHTEN: StraightenOptions = {
-  tolerance: 0.8, minLength: 15, flat: 0.1, minRadius: 500, crossings: 4, snapDeg: 1.5, blend: 1.5,
+  tolerance: 0.8, minLength: 15, flat: 0.1, minRadius: 1500, cornerDeg: 25, snapDeg: 1.5, blend: 1.5,
 };
 
 interface Line {
@@ -67,6 +68,23 @@ function run(P: readonly Vec2[], i: number, j: number): Vec2[] {
   }
 }
 
+/** The quadratic coefficient of the least-squares parabola y = a + b x + c x^2 through (xs, ys). */
+function bend(xs: readonly number[], ys: readonly number[]): number {
+  const n = xs.length;
+  const m = xs.reduce((s, v) => s + v, 0) / n;
+  // centred, for conditioning
+  let s1 = 0, s2 = 0, s3 = 0, s4 = 0, t0 = 0, t1 = 0, t2 = 0;
+  for (let k = 0; k < n; k++) {
+    const x = xs[k]! - m, y = ys[k]!, x2 = x * x;
+    s1 += x; s2 += x2; s3 += x2 * x; s4 += x2 * x2;
+    t0 += y; t1 += x * y; t2 += x2 * y;
+  }
+  // normal equations [[n s1 s2] [s1 s2 s3] [s2 s3 s4]] [a b c] = [t0 t1 t2], c by Cramer's rule
+  const det = (a: number[]) => a[0]! * (a[4]! * a[8]! - a[5]! * a[7]!) - a[1]! * (a[3]! * a[8]! - a[5]! * a[6]!) + a[2]! * (a[3]! * a[7]! - a[4]! * a[6]!);
+  const D = det([n, s1, s2, s1, s2, s3, s2, s3, s4]);
+  return Math.abs(D) < 1e-12 ? 0 : det([n, s1, t0, s1, s2, t1, s2, s3, t2]) / D;
+}
+
 /** `L` moved to the mean of `pts` along its normal, if `pts` is a straight edge with noise about it. */
 function fits(pts: readonly Vec2[], L: Line, o: StraightenOptions): Line | null {
   const nrm: Vec2 = [-L.d[1], L.d[0]];
@@ -75,13 +93,9 @@ function fits(pts: readonly Vec2[], L: Line, o: StraightenOptions): Line | null 
   const dev = r.map((v) => v - mean);
   const worst = Math.max(...dev.map(Math.abs));
   if (worst > o.tolerance) return null;
-  // straight if it barely deviates, bows less than a minRadius arc would, or only scatters about the line
-  const len = dist(pts[0]!, pts[pts.length - 1]!);
-  if (worst > Math.max(o.flat, (len * len) / (8 * o.minRadius))) {
-    let cross = 0;
-    for (let k = 1; k < dev.length; k++) if (dev[k - 1]! * dev[k]! < 0) cross++;
-    if (cross < o.crossings) return null;
-  }
+  // straight if it barely deviates, or the curve through it is gentler than a minRadius arc: deviation fitted as
+  // a + b u + c u^2 along the line, whose curvature is 2c (noise doesn't bend a least-squares parabola)
+  if (worst > o.flat && Math.abs(2 * bend(pts.map((p) => dot(sub(p, L.c), L.d)), dev)) > 1 / o.minRadius) return null;
   return { c: [L.c[0] + nrm[0] * mean, L.c[1] + nrm[1] * mean], d: L.d };
 }
 
@@ -98,6 +112,25 @@ function straightLine(pts: readonly Vec2[], o: StraightenOptions): Line | null {
     if (snapped) return { ...snapped, snapped: true };
   }
   return fits(pts, L, o);
+}
+
+/** Turning angle (degrees) of the ring at point k, between the chords to the points about `w` mm either side. */
+function turnAt(Q: readonly Vec2[], k: number, w: number): number {
+  const n = Q.length;
+  const along = (step: number) => {
+    let j = k, s = 0;
+    while (s < w) {
+      const next = (j + step + n) % n;
+      s += dist(Q[j]!, Q[next]!);
+      j = next;
+      if (j === k) break;
+    }
+    return Q[j]!;
+  };
+  const a = sub(Q[k]!, along(-1)), b = sub(along(1), Q[k]!);
+  const la = Math.hypot(a[0], a[1]), lb = Math.hypot(b[0], b[1]);
+  if (la < 1e-9 || lb < 1e-9) return 0;
+  return (Math.acos(Math.max(-1, Math.min(1, dot(a, b) / (la * lb)))) * 180) / Math.PI;
 }
 
 /** Indices of the closed ring's Ramer-Douglas-Peucker vertices at `eps`, in order. */
@@ -151,9 +184,20 @@ export function straighten(P: Ring, o: StraightenOptions = STRAIGHTEN): Ring {
     }
   };
   const len = (a: number, b: number) => ((b - a + n) % n) + 1;
+  // points where the outline turns sharply: a run doesn't grow past one
+  const sharp = Q.map((_, k) => turnAt(Q, k, 1.5) > o.cornerDeg);
+  const sharpIn = (a: number, b: number) => {
+    for (let k = a; ; k = (k + 1) % n) {
+      if (sharp[k]) return true;
+      if (k === b) return false;
+    }
+  };
   for (let s = 0; s < V.length; s++) {
     let i = V[s]!, j = V[(s + 1) % V.length]!;
-    if (!free(i, j)) continue;
+    // a span starts and ends at RDP points, which the run before may already have taken (a sharp corner)
+    while (covered[i] && i !== j) i = (i + 1) % n;
+    while (covered[j] && i !== j) j = (j - 1 + n) % n;
+    if (i === j || !free(i, j)) continue;
     let line = straightLine(run(Q, i, j), o);
     if (!line) continue;
     for (let grew = true; grew;) {
@@ -163,6 +207,8 @@ export function straighten(P: Ring, o: StraightenOptions = STRAIGHTEN): Ring {
           const a = end === 'i' ? (i - step + n) % n : i;
           const b = end === 'j' ? (j + step) % n : j;
           if (len(a, b) >= n - 2 || !free(a, b)) continue;
+          // the points it would take on: none where the outline turns sharply
+          if (end === 'i' ? sharpIn(a, (i - 1 + n) % n) : sharpIn((j + 1) % n, b)) continue;
           const longer = straightLine(run(Q, a, b), o);
           // a side squared to the axes stays squared: it doesn't grow into a run that would tilt it
           if (!longer || (line.snapped && !longer.snapped)) continue;
@@ -200,5 +246,31 @@ export function straighten(P: Ring, o: StraightenOptions = STRAIGHTEN): Ring {
       out[(i + k) % n] = [p[0] + (q[0] - p[0]) * w, p[1] + (q[1] - p[1]) * w];
     });
   }
+  // where two runs meet at a sharp corner the polygon can cut just inside a traced point there: put such points
+  // back where they were traced, so the outline really holds the trace
+  for (let pass = 0; pass < 4; pass++) {
+    let fixed = false;
+    for (let k = 0; k < n; k++) {
+      if (out[k]![0] === Q[k]![0] && out[k]![1] === Q[k]![1]) continue;
+      if (!holds(out, Q[k]!)) {
+        out[k] = [Q[k]![0], Q[k]![1]];
+        fixed = true;
+      }
+    }
+    if (!fixed) break;
+  }
   return closed ? [...out, out[0]!] : out;
+}
+
+/** Whether the closed polygon P holds q (inside, or within 1e-9 mm of its edge). */
+function holds(P: readonly Vec2[], [x, y]: Vec2): boolean {
+  let c = false;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+    const [xi, yi] = P[i]!, [xj, yj] = P[j]!;
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+    const dx = xj - xi, dy = yj - yi, l2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - xi) * dx + (y - yi) * dy) / l2));
+    if (Math.hypot(xi + t * dx - x, yi + t * dy - y) < 1e-9) return true;
+  }
+  return c;
 }
