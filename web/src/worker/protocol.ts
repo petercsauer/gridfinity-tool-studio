@@ -21,6 +21,9 @@ export interface PartTrace {
   /** Tool and pocket rings in the part's own upright frame (mm); the placement turns and moves them. */
   tool: Ring;
   pocket: Ring;
+  /** The outline as traced (or its symmetric version), part frame, and whether `tool` is the user's edit of it. */
+  traced: Ring;
+  edited: boolean;
   /** Tool and pocket where the part lay on the sheet (sheet mm). */
   sheetTool: Ring;
   sheetPocket: Ring;

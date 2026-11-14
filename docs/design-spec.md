@@ -449,6 +449,15 @@ Small presentation-only listeners, kept separate from the app logic:
 - **Bin size** (Bin card): an "Auto size" switch, then a "Size" row with two 44 px number fields (`#cellsX`, `#cellsY`; `--bg-field`, `--shadow-pill`, radius `--r-field`), a `--label-2` "×" between them and a "cells" unit. They show the current size and are disabled (`--fill`, `--label-2` text) while Auto is on. Turning Auto off locks the current size (steps of 1, or 0.5 with half-grid feet, up to 8).
 - **Hidden parts** (`#hiddenHead`, `#hiddenParts`): shown only when a part is hidden, as a section after the upload message: one row per part, "Part K" and a `.btn` "Restore".
 
+
+### 3.18 Outline pane (`section.view.outline`, `web/src/outline-view.ts`)
+- **Switch:** a third tab, "Outline", after Layout and Trace (arrow keys cycle all three).
+- **Canvas** (`#outlineCanvas`, `tabindex=0`, `touch-action:none`): the part on its own in its upright frame, fitted below the top row and above the bar. Under it the photo, mapped into that frame at 50% opacity; then the pocket as last built (`--trace-pocket` hairline at 50% over an 8% fill) and the traced outline as a dashed `--label` hairline at 55%. The path is a 2 px `--trace-tool` line over a 4 px white halo (`--trace-pocket` while an edit would make it cross itself); the selected segment is 4 px. Points are 8 px: squares for corners, circles for smooth points, white with a `--trace-tool` ring, the selected one filled. The selected point's handles are 1 px `--trace-tool` lines to 7 px white circles.
+- **Top row** (`.outline-top`, under the switch): for kits, a part list in the Layout pane's look (`#outlineParts`); then a `--bg-field` pill (`--shadow-pill`) with "Detail", a 120 px slider (0.1 to 1 mm) and its value; then a pill with the point count. No glass.
+- **Key legend** (`.outline-keys`, above the bar): one Footnote `--label-2` line, wrapping when narrow, listing the keys; each key a `<kbd>` chip (`--bg-field`, `--shadow-pill`, weight 600, `--label`). The canvas leaves room for it.
+- **Bar** (bottom): `.btn`s at 28 px, Subheadline: "Make corner"/"Make smooth", "Straighten", "Delete point", "Round corner" with a 52 px mm field, "Reset to trace". Then the status (`#outlineStatus`, `aria-live=polite`) on a `--bg-field` pill, sentence case with a full stop. No tinted controls.
+- **Keys:** Tab/Shift+Tab step through the points (then move on), arrows move one 0.1 mm (Shift 1 mm), D (or Delete) remove, A add a point after the selected one (or on the picked stretch), C corner/smooth, S straighten, R round, − and + less or more detail, Escape deselect, Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z undo and redo (shared with the Layout pane).
+- **Symmetric tool** is disabled for a part whose outline was edited (its title says why); Reset to trace enables it again.
 ---
 
 ## 4. Do / Don't (web pitfalls that make it a fake Apple clone)

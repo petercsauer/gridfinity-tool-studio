@@ -10,6 +10,8 @@ import { DEFAULTS } from '../../params';
 import type { Deps } from '../deps';
 import { partFromPreset, withUploads, type PresetData, type PresetSource } from '../presets';
 import { PipelineError, type OutlineResult } from '../protocol';
+import { refit } from '../../path/edit';
+import { toRing } from '../../path/ring';
 import { build } from './build';
 import { outline } from './outline';
 
@@ -319,4 +321,33 @@ describe('kit build performance', () => {
     expect(ms).toBeLessThan(LIMIT);
     expect(liveObjects()).toBe(0);
   }, 120_000);
+});
+
+describe('edited outlines', () => {
+  const params = { ...DEFAULTS, tool: 'stripper', sym: false };
+  it('cuts the pocket from a part\'s edited path, and ignores one that crosses itself', async () => {
+    const r0 = await outline(params, deps);
+    const pl = r0.layout.placements[0]!;
+    // the fitted outline with one point pulled 1 mm out, away from the middle
+    const path = refit(r0.parts[0]!.traced, 0.3);
+    const a = path.anchors[3]!;
+    const cx = path.anchors.reduce((t, x) => t + x.p[0], 0) / path.anchors.length;
+    const cy = path.anchors.reduce((t, x) => t + x.p[1], 0) / path.anchors.length;
+    const l = Math.hypot(a.p[0] - cx, a.p[1] - cy);
+    const out: [number, number] = [a.p[0] + (a.p[0] - cx) / l, a.p[1] + (a.p[1] - cy) / l];
+    const pulled = { anchors: path.anchors.map((x, k) => (k === 3 ? { ...a, p: out } : x)) };
+    const r = await outline(params, deps, { placements: [{ ...pl, path: pulled }] });
+    expect(r.parts[0]!.edited).toBe(true);
+    expect(r.parts[0]!.traced).toEqual(r0.parts[0]!.traced);
+    expect(hausdorff(r.parts[0]!.tool, toRing(pulled))).toBeLessThan(0.05);
+    expect(r.parts[0]!.sheetAxis).toBeUndefined();
+    // a figure-eight: the traced outline is used instead
+    const crossed = { anchors: [[0, 0], [20, 20], [20, 0], [0, 20]].map((p) => ({ p: p as [number, number], hin: [0, 0] as [number, number], hout: [0, 0] as [number, number], kind: 'corner' as const })) };
+    const bad = await outline(params, deps, { placements: [{ ...pl, path: crossed }] });
+    expect(bad.parts[0]!.edited).toBe(false);
+    expect(bad.parts[0]!.pocket).toEqual(r0.parts[0]!.pocket);
+    // junk is dropped by the clamp
+    const junk = await outline(params, deps, { placements: [{ ...pl, path: { anchors: [{ p: [Number.NaN, 0] }] } as never }] });
+    expect(junk.layout.placements[0]!.path).toBeUndefined();
+  });
 });

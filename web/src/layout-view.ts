@@ -285,6 +285,11 @@ export class LayoutView {
     this.draw();
   }
 
+  /** Undo (or redo) the last layout edit, wherever it was made. */
+  history(redo: boolean): void {
+    this.undo(redo);
+  }
+
   private undo(redo: boolean): void {
     const from = redo ? this.future : this.past;
     const to = redo ? this.past : this.future;
@@ -369,7 +374,7 @@ export class LayoutView {
     } else if (e.key === '[' || e.key === ']') {
       const c = this.pivotOf(id);
       this.edit(id, (pl) => turnAbout(pl, c, normalizeDeg(pl.rot + (e.key === ']' ? 90 : -90))));
-    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    } else if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'd' || e.key === 'D') {
       if (vis.length < 2) {
         this.say('A bin needs at least one part.');
       } else {

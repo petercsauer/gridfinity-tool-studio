@@ -4,12 +4,17 @@ import type { ManifoldToplevel } from 'manifold-3d';
 import { bounds, footprint, makePocket, type Ring, type Vec2 } from '../../geometry/pocket';
 import { placeRing, resolveLayout, type Layout, type Part, type Placement } from '../../kit';
 import { clamp, MAX_CELLS, type Params } from '../../params';
+import { checkRing, toRing } from '../../path/ring';
 import { partsOf, type PresetData } from '../presets';
 import { PipelineError } from '../protocol';
 
 export interface PlacedPart {
   part: Part;
   placement: Placement;
+  /** The outline as traced (or its symmetric version), part frame. */
+  traced: Ring;
+  /** Whether the outline used is the user's edited one. */
+  edited: boolean;
   /** Tool and pocket in the part frame. */
   tool: Ring;
   pocket: Ring;
@@ -33,8 +38,12 @@ export function placeKit(m: ManifoldToplevel, preset: PresetData, p: Params, req
   const layout = resolveLayout(parts, p, requested);
   const all = layout.placements.map((pl): PlacedPart => {
     const part = byId.get(pl.part)!;
-    const { tool, pocket } = makePocket(m, pl.sym ? part.symmetry.outline : part.outline, pl);
-    return { part, placement: pl, tool, pocket, placedTool: placeRing(tool, pl), placedPocket: placeRing(pocket, pl) };
+    const traced = pl.sym ? part.symmetry.outline : part.outline;
+    // an edited outline that wouldn't make a sound pocket (the editor doesn't let one through) is ignored
+    const ring = pl.path ? toRing(pl.path) : null;
+    const edited = !!ring && checkRing(ring).ok;
+    const { tool, pocket } = makePocket(m, edited ? ring! : traced, pl);
+    return { part, placement: pl, traced, edited, tool, pocket, placedTool: placeRing(tool, pl), placedPocket: placeRing(pocket, pl) };
   });
   const visible = all.filter((q) => !q.placement.hidden);
   if (!visible.length) throw new PipelineError('invalid', 'Every part is hidden; show at least one to make a bin.');

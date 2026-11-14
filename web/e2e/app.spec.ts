@@ -809,6 +809,122 @@ test('kit flow: a two-part photo is arranged, exported as STL and SVG, and kept'
   expect(errors).toEqual([]);
 });
 
+type SentPath = { anchors: { p: [number, number]; kind: string }[] };
+const sentPath = async (page: Page) => ((await sentPlacement(page)) as (SentPlacement & { path?: SentPath }) | undefined)?.path;
+const outlinePoints = async (page: Page) => {
+  const box = (await page.locator('#outlineCanvas').boundingBox())!;
+  const pts = JSON.parse((await page.locator('#outlineCanvas').getAttribute('data-points')) ?? '[]') as [number, number][];
+  return pts.map(([x, y]) => ({ x: box.x + x, y: box.y + y }));
+};
+const pointCount = async (page: Page) => Number((await page.locator('#outlineCount').textContent())!.split(' ')[0]);
+
+test('outline: fit, edit points, undo and reset to the trace', async ({ page }) => {
+  const errors = pageErrors(page);
+  await recordOutlines(page);
+  await open(page);
+  await page.locator('#tabOutline').click();
+  await expect(page.locator('#outlinePane')).toBeVisible();
+  await expect(page.locator('#outlineCount')).toHaveText(/^\d+ points$/);
+  const n0 = await pointCount(page);
+  expect(n0).toBeGreaterThan(5);
+  // nothing is sent until the outline is edited
+  expect((await sentPath(page)) ?? null).toBeNull();
+
+  // a point picked, then deleted: the part's outline now has one point fewer
+  let pts = await outlinePoints(page);
+  await page.mouse.click(pts[2]!.x, pts[2]!.y);
+  await expect(page.locator('#outlineRemove')).toBeEnabled();
+  await page.keyboard.press('d');
+  await expect(page.locator('#outlineCount')).toHaveText(`${n0 - 1} points`);
+  // A adds one after the selected point (the one now in its place), and undo takes it away again
+  await page.mouse.click(pts[2]!.x, pts[2]!.y);
+  await page.keyboard.press('a');
+  await expect(page.locator('#outlineCount')).toHaveText(`${n0} points`);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('#outlineCount')).toHaveText(`${n0 - 1} points`);
+  await expect.poll(async () => (await sentPath(page))?.anchors.length).toBe(n0 - 1);
+  await expect(page.locator('#sym')).toBeDisabled();
+
+  // a point dragged 3 mm right moves it in the part's outline
+  const s = Number(await page.locator('#outlineCanvas').getAttribute('data-scale'));
+  pts = await outlinePoints(page);
+  const before = (await sentPath(page))!.anchors[4]!.p;
+  await page.mouse.move(pts[4]!.x, pts[4]!.y);
+  await page.mouse.down();
+  await page.mouse.move(pts[4]!.x + 3 * s, pts[4]!.y, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await sentPath(page))!.anchors[4]!.p[0]).toBeCloseTo(before[0] + 3, 0);
+
+  // double-click switches a point between corner and smooth; undo switches it back
+  const kind0 = (await sentPath(page))!.anchors[4]!.kind;
+  pts = await outlinePoints(page);
+  await page.mouse.dblclick(pts[4]!.x, pts[4]!.y);
+  await expect.poll(async () => (await sentPath(page))!.anchors[4]!.kind).not.toBe(kind0);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(async () => (await sentPath(page))!.anchors[4]!.kind).toBe(kind0);
+  await page.screenshot({ path: test.info().outputPath('outline-light.png') });
+
+  // a corner rounded with R: it becomes two smooth points joined by an arc
+  // (one of the fitted outline's own corners: a point that turns)
+  pts = await outlinePoints(page);
+  let corner = -1;
+  for (let k = 0; k < pts.length && corner < 0; k++) {
+    await page.mouse.click(pts[k]!.x, pts[k]!.y);
+    if ((await page.locator('#outlineKind').textContent()) === 'Make smooth') corner = k;
+  }
+  expect(corner).toBeGreaterThanOrEqual(0);
+  await expect(page.locator('#outlineRound')).toBeEnabled();
+  await page.locator('#outlineRadius').fill('1');
+  const n1 = await pointCount(page);
+  await page.locator('#outlineRound').click();
+  await expect(page.locator('#outlineStatus')).toContainText(/rounded to [\d.]+ mm/);
+  await expect.poll(() => pointCount(page)).toBe(n1 + 1);
+  await expect.poll(async () => (await sentPath(page))?.anchors.length).toBe(n1 + 1);
+
+  // minus refits with less detail (the slider moves with it), then the slider all the way: fewer points
+  const n2 = await pointCount(page);
+  await page.locator('#outlineCanvas').focus();
+  await page.keyboard.press('-');
+  await expect(page.locator('#outlineDetail')).toHaveValue('0.35');
+  await page.locator('#outlineDetail').evaluate((el: HTMLInputElement) => {
+    el.value = '1';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect.poll(() => pointCount(page)).toBeLessThan(n2);
+  await expect.poll(async () => (await sentPath(page))?.anchors.length).toBe(await pointCount(page));
+
+  // back to the trace: no path is sent, and Symmetric applies again
+  await page.locator('#outlineReset').click();
+  await expect.poll(async () => (await sentPath(page)) ?? null).toBeNull();
+  await expect(page.locator('#sym')).toBeEnabled();
+  await expect(page.locator('#exp')).toHaveText(/Export STL/, { timeout: 60_000 });
+  expect(errors).toEqual([]);
+});
+
+test('outline: undoing an added last point leaves the pane working', async ({ page }) => {
+  const errors = pageErrors(page);
+  await recordOutlines(page);
+  await open(page);
+  await page.locator('#tabOutline').click();
+  await expect(page.locator('#outlineCount')).toHaveText(/^\d+ points$/);
+  const n = await pointCount(page);
+  // the last point, then a point after it (selected, the new last one), then undo: fewer points than the
+  // selection's index
+  await page.locator('#outlineCanvas').focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('a');
+  await expect(page.locator('#outlineCount')).toHaveText(`${n + 1} points`);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('#outlineCount')).toHaveText(`${n} points`);
+  // keys and clicks still work
+  await page.keyboard.press('ArrowLeft');
+  const pts = await outlinePoints(page);
+  await page.mouse.click(pts[1]!.x, pts[1]!.y);
+  await expect(page.locator('#outlineRemove')).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
 test('a kit\'s Mixed controls don\'t carry over to a tool without a layout of its own', async ({ page }) => {
   const errors = pageErrors(page);
   await openKit(page);
