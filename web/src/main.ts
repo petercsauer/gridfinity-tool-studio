@@ -207,12 +207,20 @@ function showPane(name: keyof typeof tabs): void {
   }
 }
 const tabOrder = Object.keys(tabs) as (keyof typeof tabs)[];
+/** The tool the pane was last chosen for, by the app (on the tool's first outline) or the user; the choice
+ * holds until the tool changes. */
+let paneTool = '';
+/** The user picked a pane: it holds for this tool, even if its first outline comes back after. */
+function pickPane(name: keyof typeof tabs): void {
+  paneTool = toolMenu.value;
+  showPane(name);
+}
 for (const [k, tab] of Object.entries(tabs) as [keyof typeof tabs, HTMLElement][]) {
-  tab.addEventListener('click', () => showPane(k));
+  tab.addEventListener('click', () => pickPane(k));
   tab.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     const next = tabOrder[(tabOrder.indexOf(k) + (e.key === 'ArrowRight' ? 1 : tabOrder.length - 1)) % tabOrder.length]!;
-    showPane(next);
+    pickPane(next);
     tabs[next].focus();
     e.preventDefault();
   });
@@ -288,8 +296,6 @@ outlineParts.addEventListener('keydown', (e) => {
   }
   e.preventDefault();
 });
-/** The tool the pane was last chosen for; the user's choice holds until the tool changes. */
-let paneTool = '';
 
 // ---- 3D view (Quick Look product shot)
 // Vertex normals for the (non-indexed) bin mesh. Two stages:
