@@ -90,9 +90,10 @@ const MAGENTA = [255, 0, 255, 255] as const;
 
 /** A flat, top-down "photo" of the stripper's sheet at 4 px/mm with `blobs` painted on it in magenta, cut off
  * by the photo's edge where they run past it. */
-async function paintedSheet(blobs: readonly Blob2D[]): Promise<RGBAImage> {
+async function paintedSheet(blobs: readonly Blob2D[], reach: [number, number] = [60, 80]): Promise<RGBAImage> {
   const px = 4;
-  const { image, box } = await renderSheetView(presetPhoto('stripper'), sheetFixture('stripper').homography, [[[60, 80]]], px);
+  // the photo covers the sheet and `reach` (sheet mm), so there is room for things beside the paper
+  const { image, box } = await renderSheetView(presetPhoto('stripper'), sheetFixture('stripper').homography, [[[60, 80], reach]], px);
   const out = new Uint8ClampedArray(image.data);
   for (let y = 0; y < image.height; y++) {
     for (let x = 0; x < image.width; x++) {
@@ -176,6 +177,14 @@ describe('upload of a sheet with several parts', () => {
   it('rejects more than 12 parts', async () => {
     const grid = [60, 85, 110, 135, 160].flatMap((x) => [70, 100, 130].map((y): Blob2D => ({ c: [x, y], size: [15, 15], deg: 0 })));
     await rejects(upload(await paintedSheet(grid.slice(0, 13)), 'kit', deps, magentaEnv), 'too-many-parts', /13 parts/);
+  }, 120000);
+
+  it('ignores clutter on the table beside the paper, even where the tighter crop cuts it to a sliver', async () => {
+    // a tool reaching x = 190 mm, and a 70 mm object beyond the paper's 215.9 mm edge: pass 2's crop ends at
+    // 205 mm and leaves a 5 mm sliver of it whose centre is on the paper
+    const kit: Blob2D[] = [{ c: [150, 150], size: [80, 20], deg: 0 }, { c: [235, 150], size: [70, 20], deg: 0 }];
+    const r = await upload(await paintedSheet(kit, [300, 150]), 'tool', deps, magentaEnv);
+    await expectParts(r, [kit[0]!]);
   }, 120000);
 
   it('names the part that runs off the photo', async () => {

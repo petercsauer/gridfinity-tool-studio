@@ -186,6 +186,9 @@ export async function upload(image: RGBAImage, name: string, { manifold }: Deps,
   const first = findParts(cv, await env.segment((await rectRegion(image, H, R1, PX)).canvas), [R1[0], R1[1]]);
   for (const f of first) f.contour.delete();
   if (!first.length) throw new PipelineError('no-tool', NO_TOOL);
+  /** Pass-1 parts' boxes in sheet mm, grown 3 mm: only pass-2 blobs centred in one are parts (the tighter crop
+   * can cut clutter beside the paper down to a sliver whose centre is on it). */
+  const seen = first.map(({ box: [x, y, w, h] }): Box => [R1[0] + x / PX - 3, R1[1] + y / PX - 3, R1[0] + (x + w) / PX + 3, R1[1] + (y + h) / PX + 3]);
   const x0 = Math.min(...first.map((f) => f.box[0]));
   const y0 = Math.min(...first.map((f) => f.box[1]));
   const x1 = Math.max(...first.map((f) => f.box[0] + f.box[2]));
@@ -195,7 +198,13 @@ export async function upload(image: RGBAImage, name: string, { manifold }: Deps,
   const R2: Box = [R1[0] + x0 / PX - 15, R1[1] + y0 / PX - 15, R1[0] + x1 / PX + 15, R1[1] + y1 / PX + 15];
   const { canvas, valid } = await rectRegion(image, H, R2, PX);
   const mask = await env.segment(canvas);
-  const found = findParts(cv, mask, [R2[0], R2[1]]);
+  const all = findParts(cv, mask, [R2[0], R2[1]]);
+  const inSeen = (f: FoundPart) => {
+    const [sx, sy] = [R2[0] + f.centre[0] / PX, R2[1] + f.centre[1] / PX];
+    return seen.some(([a, b, c, d]) => sx >= a && sx <= c && sy >= b && sy <= d);
+  };
+  const found = all.filter(inSeen);
+  for (const f of all) if (!found.includes(f)) f.contour.delete();
   const parts: Part[] = [];
   const onSheet: Point[][] = [];
   try {
