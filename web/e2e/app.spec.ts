@@ -902,6 +902,55 @@ test('outline: fit, edit points, undo and reset to the trace', async ({ page }) 
   expect(errors).toEqual([]);
 });
 
+test('the finger slot shortens down to a round hole, or moves to the tip', async ({ page }) => {
+  const errors = pageErrors(page);
+  await open(page);
+  const width = async () => Number((await page.locator('#pdim').textContent())!.split('×')[0]);
+  await expect(page.locator('#pdim')).toHaveText(/×/);
+  const full = await width();
+  await setSlider(page, 'slotSpan', 0);
+  await expect(page.locator('#slotSpanV')).toHaveText('Circle');
+  await expect.poll(width).toBeLessThan(full - 5);
+  const circle = await width();
+  await setSlider(page, 'slotSpan', 0.5);
+  await expect(page.locator('#slotSpanV')).toHaveText('50');
+  await expect.poll(width).toBeGreaterThan(circle);
+  // at the tip: no slot across, so narrower still than half a slot; Other end becomes available
+  await page.locator('#slotTipBtn').click();
+  await expect(page.locator('#slotTipBtn')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#slotSpan')).toBeDisabled();
+  await expect(page.locator('#slotFlipBtn')).toBeEnabled();
+  await page.locator('#slotFlipBtn').click();
+  await expect(page.locator('#slotFlipBtn')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#slotAcross').click();
+  await expect(page.locator('#slotSpan')).toBeEnabled();
+  await expect(page.locator('#exp')).toHaveText(/Export STL/, { timeout: 60_000 });
+  expect(errors).toEqual([]);
+});
+
+test('Arrange packs a kit into the fewest cells, one undo step', async ({ page }) => {
+  const errors = pageErrors(page);
+  await recordOutlines(page);
+  await openKit(page);
+  // pile the parts on each other, then arrange them apart
+  const pts = await partsOnScreen(page);
+  await drag(page, pts[1]!, pts[0]!);
+  await expect(page.locator('#layoutWarnings li')).not.toHaveCount(0);
+  await expect.poll(async () => (await lastLayout(page)) !== null).toBe(true);
+  const piled = await lastLayout(page);
+  await page.locator('#arrangeBtn').click();
+  await expect(page.locator('#layoutStatus')).toHaveText(/^Arranged to fit a [\d.]+×[\d.]+ bin\.$/);
+  await expect(page.locator('#layoutWarnings li')).toHaveCount(0);
+  const [nx, ny] = (await page.locator('#layoutStatus').textContent())!.match(/([\d.]+)×([\d.]+)/)!.slice(1).map(Number);
+  await expect(page.locator('#cells')).toHaveText(`${nx}×${ny}`);
+  // every part's axis along x or y
+  for (const pl of (await lastLayout(page))!.placements) expect(Math.abs(((pl.rot % 90) + 90) % 90 - 45)).toBeGreaterThan(40);
+  await page.locator('#plan').focus();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(async () => JSON.stringify((await lastLayout(page))?.placements.map((q) => [q.x, q.y]))).toBe(JSON.stringify(piled!.placements.map((q) => [q.x, q.y])));
+  expect(errors).toEqual([]);
+});
+
 test('outline: undoing an added last point leaves the pane working', async ({ page }) => {
   const errors = pageErrors(page);
   await recordOutlines(page);
@@ -930,15 +979,20 @@ test('a kit\'s Mixed controls don\'t carry over to a tool without a layout of it
   await openKit(page);
   // part 2 without a finger slot: with no part selected, Grab slot is Mixed
   await page.locator('#partList [role=option]').nth(1).click();
+  await page.locator('#slotTipBtn').click();
   await page.locator('#slotOn').uncheck();
   await page.locator('#scopeClear').click();
   await expect(page.locator('#slotOn')).toHaveClass(/mixed/);
+  await expect(page.locator('#slotTipBtn')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#slotAcross')).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('#clearanceV')).not.toHaveText('Mixed');
   // a preset takes the inspector's own values again: its finger slot is on and nothing reads Mixed
   await page.locator('#tool').selectOption('groovejoint');
   await expect(page.locator('#slotOn')).toBeChecked();
+  await expect(page.locator('#slotAcross')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#slotSpan')).toBeEnabled();
   await expect(page.locator('#slotOn')).not.toHaveClass(/mixed/);
-  for (const id of ['clearanceV', 'slotDV', 'slotFracV', 'depthV']) await expect(page.locator(`#${id}`)).not.toHaveText('Mixed');
+  for (const id of ['clearanceV', 'slotDV', 'slotFracV', 'slotSpanV', 'depthV']) await expect(page.locator(`#${id}`)).not.toHaveText('Mixed');
   await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
   expect(errors).toEqual([]);
 });

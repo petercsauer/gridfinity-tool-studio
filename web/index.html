@@ -38,6 +38,7 @@
       <div class="layout-warnings" role="status" aria-label="Layout warnings"><ul id="layoutWarnings" hidden></ul></div>
       <div class="layout-bar">
         <ul class="part-list" id="partList" role="listbox" aria-label="Parts" aria-describedby="layoutKeys"></ul>
+        <button class="btn arrange" id="arrangeBtn" title="Pack the parts into the fewest grid cells, each upright or on its side">Arrange</button>
         <div class="layout-status num" id="layoutStatus" role="status" aria-live="polite">Drag a part to move it, or its handle to turn it.</div>
       </div>
       <p id="layoutKeys" hidden>Tab picks a part. Arrow keys move it 1 mm, with Shift 10 mm. [ and ] turn it 90°. D or Delete hides it, until it is restored under Hidden parts. Escape clears the selection. Command or Control Z undoes.</p>
@@ -162,10 +163,16 @@
     <h2 class="section">Finger slot</h2>
     <div class="card">
       <div class="row"><label for="slotOn">Grab slot</label><input type="checkbox" id="slotOn" role="switch" checked></div>
+      <div class="row"><span id="slotStyleL">Style</span><span class="snap-seg" role="group" aria-labelledby="slotStyleL"><button id="slotAcross" aria-pressed="true" title="A slot across the part, at Position along it">Across</button><button id="slotTipBtn" aria-pressed="false" title="A round hole at the part's narrower end, to lift it by its tip">At tip</button></span><button class="btn mini" id="slotFlipBtn" aria-pressed="false" disabled title="Put the tip hole at the part's other end">Other end</button></div>
       <div class="row slider">
         <label for="slotD">Diameter</label>
         <output class="value num" for="slotD"><b id="slotDV">25</b><span class="unit">mm</span></output>
         <input type="range" id="slotD" min="8" max="40" step="1" value="25" style="--p:53.12%">
+      </div>
+      <div class="row slider">
+        <label for="slotSpan">Length</label>
+        <output class="value num" for="slotSpan"><b id="slotSpanV">100</b><span class="unit" id="slotSpanU">%</span></output>
+        <input type="range" id="slotSpan" min="0" max="1" step="0.01" value="1" style="--p:100%" title="How much of the slot across the part is cut; 0 leaves a round hole">
       </div>
       <div class="row slider">
         <label for="slotFrac">Position</label>
@@ -173,7 +180,7 @@
         <input type="range" id="slotFrac" min="0" max="1" step="0.01" value="0.4" style="--p:40.0%">
       </div>
     </div>
-    <div class="footer">Slot position along the tool’s length.</div>
+    <div class="footer" id="slotNote">Slot position along the tool’s length.</div>
     <div class="sheet-pill trace-pill" title="The traced outline and the pocket at 1:1 scale in millimetres, for laser cutting foam or CAD">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8.2"/><path d="M5 7.4 8 10.4l3-3"/><path d="M3 12.6h10"/></svg>
       <span class="sheet-label">Trace outline</span>

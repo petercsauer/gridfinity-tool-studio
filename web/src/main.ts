@@ -13,6 +13,7 @@ import { writeStl } from './stl';
 import { traceDxf, traceSvg, type TraceLayers } from './trace-export';
 import { isDark, TraceView } from './trace';
 import { OutlineView } from './outline-view';
+import { arrange, packGap } from './kit-pack';
 import { decodePhoto } from './vision/decode';
 import { modelCached } from './vision/model';
 import { centroid } from './vision/symmetry';
@@ -41,6 +42,9 @@ function state(): Params {
     slotR: +input('slotD').value / 2,
     slotOver: DEFAULTS.slotOver,
     slotFrac: +input('slotFrac').value,
+    slotSpan: +input('slotSpan').value,
+    slotTip: $('slotTipBtn').getAttribute('aria-pressed') === 'true',
+    slotFlip: $('slotFlipBtn').getAttribute('aria-pressed') === 'true',
     u: +input('u').value,
     depth: +input('depth').value,
     fillet: +input('fillet').value,
@@ -225,6 +229,31 @@ for (const [k, tab] of Object.entries(tabs) as [keyof typeof tabs, HTMLElement][
     e.preventDefault();
   });
 }
+
+// ---- Arrange: pack the visible parts into the fewest cells (one undo step; the bin size goes back to auto)
+$('arrangeBtn').addEventListener('click', () => {
+  const r = outlineNow();
+  const l = currentLayout();
+  if (!r || !l) return;
+  const p = state();
+  const vis = l.placements.filter((pl) => !pl.hidden);
+  const parts = vis.flatMap((pl) => {
+    const t = r.parts.find((q) => q.id === pl.part);
+    return t ? [{ id: pl.part, pocket: t.pocket, axisDeg: t.axisDeg }] : [];
+  });
+  if (!parts.length) return;
+  const packed = arrange(parts, { gap: packGap(p.fillet), fillet: p.fillet, halfGrid: p.halfGrid });
+  const at = new Map(packed.placements.map((q) => [q.part, q]));
+  const next: Layout = {
+    placements: l.placements.map((pl) => {
+      const q = at.get(pl.part);
+      return q ? { ...pl, x: q.x, y: q.y, rot: normalizeDeg(q.rot) } : pl;
+    }),
+  };
+  layoutView.apply(next, l);
+  $('layoutStatus').textContent = packed.fits ? `Arranged to fit a ${packed.nx}×${packed.ny} bin.`
+    : `These parts need at least a ${packed.nx}×${packed.ny} bin; the largest is ${MAX_CELLS}×${MAX_CELLS}. Hide a part, or try smaller finger holes.`;
+});
 
 // ---- the Outline pane: the selected part's outline, editable. An edit is the part's `path` in the layout, so
 // it is saved, undone and sent to the worker like any other layout change.
@@ -789,23 +818,29 @@ function showSwitch(id: string, values: boolean[]): void {
   el.checked = !mixed && !!values[0];
   setMixed(el, mixed);
 }
-const PER_PART = ['sym', 'clearance', 'slotOn', 'slotD', 'slotFrac', 'depth', 'rot'];
+const PER_PART = ['sym', 'clearance', 'slotOn', 'slotD', 'slotFrac', 'slotSpan', 'depth', 'rot'];
 /** The inspector for the current tool and selection: what the per-part controls edit and their values, the
  * bin size, the hidden parts, and the selected (or only) part's pocket size and symmetry note. */
 /** The per-part controls (Rotation aside, which always shows its part's angle), and how each shows its value. */
 const OWN: Record<string, ((v: number) => string) | null> = {
   sym: null, slotOn: null,
-  clearance: trim, slotD: String, slotFrac: (v) => String(Math.round(v * 100)), depth: trim,
+  clearance: trim, slotD: String, slotFrac: (v) => String(Math.round(v * 100)), slotSpan: (v) => spanText(v), depth: trim,
 };
+/** The finger-hole style buttons, kept with them. */
+const OWN_PRESSED = ['slotTipBtn', 'slotFlipBtn'];
 /** The inspector's own per-part values, as last shown (kept while the controls show a laid-out tool's parts,
  * which an edit can start before the next sync), and whether they show such a tool's parts now. */
 let ownControls: Map<string, string | boolean> | null = null;
 let showingLayout = false;
 function snapshotControls(): Map<string, string | boolean> {
-  return new Map(Object.keys(OWN).map((id) => [id, OWN[id] ? input(id).value : input(id).checked]));
+  return new Map<string, string | boolean>([
+    ...Object.keys(OWN).map((id): [string, string | boolean] => [id, OWN[id] ? input(id).value : input(id).checked]),
+    ...OWN_PRESSED.map((id): [string, boolean] => [id, $(id).getAttribute('aria-pressed') === 'true']),
+  ]);
 }
 function restoreControls(saved: Map<string, string | boolean>): void {
   for (const [id, v] of saved) {
+    if (OWN_PRESSED.includes(id)) continue;
     const el = input(id);
     const fmt = OWN[id];
     if (fmt) {
@@ -814,6 +849,7 @@ function restoreControls(saved: Map<string, string | boolean>): void {
       syncP(el);
     } else el.checked = v as boolean;
   }
+  showSlotStyle([!!saved.get('slotTipBtn')], [!!saved.get('slotFlipBtn')]);
   syncDepth();
 }
 function syncInspector(): void {
@@ -844,6 +880,8 @@ function syncInspector(): void {
     showSwitch('slotOn', inScope.map((pl) => pl.slotOn));
     showRange('slotD', inScope.map((pl) => pl.slotR * 2), String);
     showRange('slotFrac', inScope.map((pl) => pl.slotFrac), (v) => String(Math.round(v * 100)));
+    showRange('slotSpan', inScope.map((pl) => pl.slotSpan ?? 1), spanText);
+    showSlotStyle(inScope.map((pl) => !!pl.slotTip), inScope.map((pl) => !!pl.slotFlip));
     showRange('depth', inScope.map((pl) => pl.depth), trim);
   }
   // an edited outline replaces the traced one and its symmetric version
@@ -925,6 +963,12 @@ function bindPart(id: string, fmt: (v: number) => string, write: (pl: Placement,
 bindPart('clearance', trim, (pl, v) => ({ ...pl, clearance: v }));
 bindPart('slotD', String, (pl, v) => ({ ...pl, slotR: v / 2 }));
 bindPart('slotFrac', (v) => String(Math.round(v * 100)), (pl, v) => ({ ...pl, slotFrac: v }));
+/** Slot length: a percentage, or "Circle" at 0. */
+const spanText = (v: number) => {
+  $('slotSpanU').hidden = v <= 0;
+  return v <= 0 ? 'Circle' : String(Math.round(v * 100));
+};
+bindPart('slotSpan', spanText, (pl, v) => ({ ...pl, slotSpan: v }));
 bind('u', (v) => v + 'U');
 bind('fillet', trim);
 bind('bfillet', trim);
@@ -935,6 +979,34 @@ input('depth').addEventListener('input', () => {
   editParts((pl) => ({ ...pl, depth: +input('depth').value }));
 });
 input('depth').addEventListener('change', endGesture);
+/** Finger access: a slot across the part, or a round hole at its tip. */
+function showSlotStyle(tips: boolean[], flips: boolean[] = []): void {
+  const mixed = tips.some((v) => v !== tips[0]);
+  $('slotAcross').setAttribute('aria-pressed', String(!mixed && !tips[0]));
+  $('slotTipBtn').setAttribute('aria-pressed', String(!mixed && !!tips[0]));
+  const allTip = !mixed && !!tips[0];
+  input('slotFrac').disabled = allTip;
+  input('slotSpan').disabled = allTip;
+  const flipMixed = flips.some((v) => v !== flips[0]);
+  $<HTMLButtonElement>('slotFlipBtn').disabled = !allTip;
+  $('slotFlipBtn').setAttribute('aria-pressed', String(allTip && !flipMixed && !!flips[0]));
+  $('slotNote').textContent = allTip ? 'A round hole of the Diameter at the part’s narrower end.' : 'Slot position along the tool’s length.';
+}
+$('slotFlipBtn').addEventListener('click', () => {
+  const flip = $('slotFlipBtn').getAttribute('aria-pressed') !== 'true';
+  $('slotFlipBtn').setAttribute('aria-pressed', String(flip));
+  editParts((pl) => ({ ...pl, slotFlip: flip }));
+  endGesture();
+  syncInspector();
+});
+for (const [id, tip] of [['slotAcross', false], ['slotTipBtn', true]] as const) {
+  $(id).addEventListener('click', () => {
+    showSlotStyle([tip]);
+    editParts((pl) => ({ ...pl, slotTip: tip }));
+    endGesture();
+    syncInspector();
+  });
+}
 for (const id of ['sym', 'slotOn'] as const) {
   input(id).addEventListener('change', () => {
     setMixed(input(id), false);
