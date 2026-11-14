@@ -90,11 +90,12 @@ interface Blob2D {
 
 const MAGENTA = [255, 0, 255, 255] as const;
 
-/** A flat, top-down "photo" of the stripper's sheet at 4 px/mm with the stripper itself painted out (paper
- * grey over its box) and `blobs` painted on it in magenta, cut off by the photo's edge where they run past it. */
-async function paintedSheet(blobs: readonly Blob2D[]): Promise<RGBAImage> {
+/** A flat, top-down "photo" of the stripper's sheet at 4 px/mm, reaching `reach` (sheet mm) so there is room
+ * for things beside the paper, with the stripper itself painted out (paper grey over its box) and `blobs` painted
+ * on it in magenta, cut off by the photo's edge where they run past it. */
+async function paintedSheet(blobs: readonly Blob2D[], reach: [number, number] = [60, 80]): Promise<RGBAImage> {
   const px = 4;
-  const { image, box } = await renderSheetView(presetPhoto('stripper'), sheetFixture('stripper').homography, [[[60, 80]]], px);
+  const { image, box } = await renderSheetView(presetPhoto('stripper'), sheetFixture('stripper').homography, [[[60, 80], reach]], px);
   const fx = presetFixture('stripper');
   const onSheet = apply(fx.up2sheet, fx.outline_mm);
   const [tx0, ty0] = [Math.min(...onSheet.map((q) => q[0])) - 6, Math.min(...onSheet.map((q) => q[1])) - 6];
@@ -239,6 +240,66 @@ describe('upload of a sheet with several parts', () => {
       },
     };
     await expectParts(await upload(await paintedSheet(kit), 'kit', deps, env), kit);
+  }, 120000);
+
+  /** A model that sees magenta always, cyan in the whole-page pass (1), and all of this file's paint in a part's
+   * own crop (3 and on): what is cyan (or yellow) is lost in the crop of all the parts (2). */
+  const droppingEnv = (): UploadEnv & { calls: () => number } => {
+    let call = 0;
+    return {
+      ...magentaEnv,
+      calls: () => call,
+      segment: async ({ width, height, data }) => {
+        call++;
+        const m = new Uint8Array(width * height);
+        for (let i = 0; i < m.length; i++) {
+          const [r, g, b] = [data[i * 4]!, data[i * 4 + 1]!, data[i * 4 + 2]!];
+          const magenta = r > 200 && g < 100 && b > 200;
+          const cyan = r < 100 && g > 200 && b > 200;
+          // cyan, yellow and the green blend between them (not the real stripper's red handles)
+          const paint = Math.max(r, g, b) - Math.min(r, g, b) > 100 && g > 200;
+          m[i] = magenta || (call === 1 && cyan) || (call > 2 && paint) ? 255 : 0;
+        }
+        return { width, height, data: m };
+      },
+    };
+  };
+  const CYAN = [0, 255, 255, 255] as const;
+
+  it('keeps a dropped part, not a slice of a large neighbour, in the part\'s own crop', async () => {
+    // a thin antenna tilted beside a box's corner: their boxes overlap, their pixels don't
+    const kit: Blob2D[] = [{ c: [105, 150], size: [80, 80], deg: 0 }, { c: [147.5, 95], size: [2.5, 60], deg: -3, color: CYAN }];
+    const env = droppingEnv();
+    const r = await upload(await paintedSheet(kit), 'kit', deps, env);
+    expect(env.calls()).toBeGreaterThan(2);
+    await expectParts(r, [kit[1]!, kit[0]!]);
+  }, 120000);
+
+  it('grows a dropped part\'s crop until it holds all of a long part', async () => {
+    // 150 mm long, of which pass 1 sees the first 30 mm (cyan) and its own crops all
+    const YELLOW = [255, 255, 0, 255] as const;
+    const kit: Blob2D[] = [
+      { c: [45, 205], size: [30, 10], deg: 0, color: CYAN },
+      { c: [120, 205], size: [120, 10], deg: 0, color: YELLOW },
+      { c: [105, 120], size: [60, 40], deg: 0 },
+    ];
+    const r = await upload(await paintedSheet(kit), 'kit', deps, droppingEnv());
+    expect(r.parts).toHaveLength(2);
+    // the whole 150 mm, not the 30 mm pass 1 saw (to a millimetre: this test's model takes the paint's blend into
+    // the paper as paint, and straightening moves each long side out to its furthest point)
+    const [short, long] = await rectDims(r.parts[1]!.outline);
+    expect(Math.abs(long - 150)).toBeLessThanOrEqual(1.25);
+    expect(Math.abs(short - 10)).toBeLessThanOrEqual(1);
+    const [c] = apply(r.parts[1]!.up2sheet, [await rectCentre(r.parts[1]!.outline)]);
+    expect(Math.hypot(c![0] - 105, c![1] - 205)).toBeLessThanOrEqual(1);
+  }, 120000);
+
+  it('ignores clutter on the table beside the paper, even where the tighter crop cuts it to a sliver', async () => {
+    // a tool reaching x = 190 mm, and a 70 mm object beyond the paper's 215.9 mm edge: pass 2's crop ends at
+    // 205 mm and leaves a 5 mm sliver of it whose centre is on the paper
+    const kit: Blob2D[] = [{ c: [150, 150], size: [80, 20], deg: 0 }, { c: [235, 150], size: [70, 20], deg: 0 }];
+    const r = await upload(await paintedSheet(kit, [300, 150]), 'tool', deps, magentaEnv);
+    await expectParts(r, [kit[0]!]);
   }, 120000);
 
   it('names the part that runs off the photo', async () => {

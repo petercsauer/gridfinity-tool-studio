@@ -102,3 +102,33 @@ describe('slot length', () => {
     expect(round.ymax).toBeCloseTo(full.ymax, 6);
   });
 });
+
+describe('arrange within the largest bin', () => {
+  const fillet = 3.175, gap = packGap(fillet);
+  it('never picks a packing past 8 cells when one within them exists', () => {
+    // three long antennas: one column is 1x12; two side by side fit 2x7
+    const parts = [
+      { id: 'a', pocket: rect(23.6, 198), axisDeg: 0 },
+      { id: 'b', pocket: rect(15.4, 135), axisDeg: 0 },
+      { id: 'c', pocket: rect(19, 129), axisDeg: 0 },
+    ];
+    const r = arrange(parts, { gap, fillet, halfGrid: false });
+    expect(r.fits).toBe(true);
+    expect(Math.max(r.nx, r.ny)).toBeLessThanOrEqual(8);
+    const placed = r.placements.map((q) => placeRing(parts.find((p) => p.id === q.part)!.pocket, q));
+    expect(footprint(placed, fillet)).toEqual([r.nx, r.ny]);
+  });
+
+  it('with half-grid feet too', () => {
+    const parts = Array.from({ length: 10 }, (_, k) => ({ id: `p${k}`, pocket: rect(20 + (k % 3) * 6, 90 + (k % 4) * 25), axisDeg: 0 }));
+    const r = arrange(parts, { gap, fillet, halfGrid: true });
+    expect(r.fits).toBe(true);
+    expect(Math.max(r.nx, r.ny)).toBeLessThanOrEqual(8);
+  });
+
+  it('says so when nothing fits, and gives the least oversized', () => {
+    const r = arrange([{ id: 'x', pocket: rect(40, 400), axisDeg: 0 }], { gap, fillet, halfGrid: false });
+    expect(r.fits).toBe(false);
+    expect(Math.max(r.nx, r.ny)).toBeGreaterThan(8);
+  });
+});

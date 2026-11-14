@@ -12,8 +12,10 @@ const S = 2;
 const PAPER: Box = [3, 3, 207.9, 276.4];
 /** A pixel is a candidate when darker than this share of the paper brightness around it… */
 const DARK = 0.62;
-/** …or this saturated (0-255) where the paper is grey. */
+/** …or this saturated (0-255) and darker than this share of the paper: saturation alone also fires on plain
+ * paper in a photo with a colour cast (warm light), which leaves a pixel's saturation but not its brightness. */
 const SATURATED = 90;
+const TINTED = 0.85;
 /** Width (mm) of the brightness estimate's window: the paper level is found across features narrower than it. */
 const PAPER_WINDOW = 26;
 /** Width (mm) of the opening that removes the print (lines and text) and specks. */
@@ -63,7 +65,7 @@ export async function paperBlobs(canvas: RGBAImage, origin: readonly [number, nu
         const i = y * w + x;
         const paper = b[i]!;
         if (paper < 100) continue; // not paper: off the photo, or a dark table
-        if (g[i]! < DARK * paper || (hs[i * 3 + 1]! > SATURATED && g[i]! < 0.97 * paper)) m[i] = 255;
+        if (g[i]! < DARK * paper || (hs[i * 3 + 1]! > SATURATED && g[i]! < TINTED * paper)) m[i] = 255;
       }
     }
     // drop the print and specks, then rejoin a part's pieces

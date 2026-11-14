@@ -19,6 +19,8 @@ export interface Packed {
   placements: { part: string; x: number; y: number; rot: number }[];
   nx: number;
   ny: number;
+  /** Whether it fits the largest bin (MAX_CELLS a side); if no packing does, this is the least oversized. */
+  fits: boolean;
 }
 
 /** Most parts tried in every orientation (2^n combinations); more get each part's narrower side across. */
@@ -78,30 +80,34 @@ export function arrange(parts: readonly PackPart[], { gap, fillet, halfGrid }: {
     return c;
   };
   const step = halfGrid ? 0.5 : 1;
-  let best: { score: [number, number, number]; items: Item[]; at: [number, number][]; w: number; h: number } | null = null;
+  // every row width a bin from one cell up to the largest could hold (the widest pocket extent it holds, the
+  // footprint's margin taken off), and one row of everything
+  const widths = new Set<number>([Infinity]);
+  for (let c = step; c <= MAX_CELLS + 1e-9; c += step) {
+    let lo = 0, hi = c * 42;
+    for (let k = 0; k < 30; k++) {
+      const mid = (lo + hi) / 2;
+      if (cells(mid) <= c) lo = mid;
+      else hi = mid;
+    }
+    widths.add(lo);
+  }
+  // scored by how far past the largest bin it goes (any that fits beats any that doesn't), then cells, the
+  // longer side and the area
+  type Score = [number, number, number, number];
+  const better = (a: Score, b: Score) => {
+    for (let k = 0; k < 4; k++) if (Math.abs(a[k]! - b[k]!) > 1e-6) return a[k]! < b[k]!;
+    return false;
+  };
+  let best: { score: Score; items: Item[]; at: [number, number][]; w: number; h: number } | null = null;
   for (const sides of combos) {
     const items = parts.map((p, k) => orient(p, sides[k]!));
-    // every row width a bin from one cell up to the largest could hold, and one row of everything
-    const widths = new Set<number>([Infinity]);
-    for (let c = step; c <= MAX_CELLS + 1e-9; c += step) {
-      // the widest pocket extent a c-cell bin holds (footprint's margin taken off)
-      let lo = 0, hi = c * 42;
-      for (let k = 0; k < 30; k++) {
-        const mid = (lo + hi) / 2;
-        if (cells(mid) <= c) lo = mid;
-        else hi = mid;
-      }
-      widths.add(lo);
-    }
     for (const maxW of widths) {
       const r = shelves(items, maxW, gap);
       if (!r) continue;
       const nx = cells(r.w), ny = cells(r.h);
-      const score: [number, number, number] = [nx * ny, Math.max(nx, ny), r.w * r.h];
-      if (!best || score[0] < best.score[0] || (score[0] === best.score[0] && (score[1] < best.score[1]
-        || (score[1] === best.score[1] && score[2] < best.score[2] - 1e-6)))) {
-        best = { score, items, ...r };
-      }
+      const score: Score = [Math.max(0, nx - MAX_CELLS) + Math.max(0, ny - MAX_CELLS), nx * ny, Math.max(nx, ny), r.w * r.h];
+      if (!best || better(score, best.score)) best = { score, items, ...r };
     }
   }
   const b = best!;
@@ -115,6 +121,7 @@ export function arrange(parts: readonly PackPart[], { gap, fillet, halfGrid }: {
     }),
     nx: cells(b.w),
     ny: cells(b.h),
+    fits: b.score[0] === 0,
   };
 }
 
