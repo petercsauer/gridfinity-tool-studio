@@ -105,14 +105,17 @@ describe('rectification', () => {
     expect(Math.min(...paper.rgba.slice(0, 3))).toBeGreaterThan(120);
   });
 
-  it('renders the sheet view around the markers, widened for a tool past the paper', async () => {
+  it('renders the sheet view around the markers, widened for a part past the paper', async () => {
     const m = 0.18 * 24 + 3;
     const inside: Point[] = [[60, 80], [150, 200]];
-    const a = await renderSheetView(img, H, inside);
+    const a = await renderSheetView(img, H, [inside]);
     expect(a.box).toEqual([18 - m, 22 - m, 197.9 + m, 257.4 + m].map((v) => Math.round(v * 100) / 100));
     expect([a.image.width, a.image.height]).toEqual([Math.trunc((197.9 - 18 + 2 * m) * 4), Math.trunc((257.4 - 22 + 2 * m) * 4)]);
-    const b = await renderSheetView(img, H, [...inside, [230, 120]]);
+    const b = await renderSheetView(img, H, [inside, [[230, 120], [100, 120]]]);
     expect(b.box[2]).toBe(236);
     expect(b.box.slice(0, 2)).toEqual(a.box.slice(0, 2));
+    const c = await renderSheetView(img, H, [[[230, 120]], [[100, -10]]]);
+    expect(c.box[1]).toBe(-16);
+    expect(c.box[2]).toBe(236);
   });
 });

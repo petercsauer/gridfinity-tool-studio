@@ -1,7 +1,7 @@
-// The Trace pane: the perspective-corrected calibration sheet with the tool (blue) and
-// pocket (red) outlines drawn where the tool lies on the paper, all in sheet mm, plus the mirror
-// axis (green, dashed) when "Symmetric tool" is on, and the pocket's width and length as dimension
-// lines, measured along the tool's own axes.
+// The Trace pane: the perspective-corrected calibration sheet with every part's tool (blue) and
+// pocket (red) outlines drawn where the part lies on the paper, all in sheet mm, plus each mirror
+// axis (green, dashed) where "Symmetric tool" is on, and, for a single part, the pocket's width and
+// length as dimension lines, measured along the part's own axes.
 import type { Measurements, OutlineResult } from './worker/protocol';
 
 export const isDark = () => document.documentElement.dataset.theme === 'dark';
@@ -177,6 +177,9 @@ export class TraceView {
     ctx.clearRect(0, 0, W, H);
     const o = this.outline;
     if (!o) return;
+    const { parts } = o;
+    // dimensions only for a single part; with several the lines would cross each other
+    const measure = parts.length === 1 ? parts[0]!.measure : undefined;
     // the whole calibration sheet, fitted to the pane
     const [bx0, by0, bx1, by1] = o.sheetBox;
     const bw = bx1 - bx0;
@@ -185,11 +188,11 @@ export class TraceView {
     let s = Math.min((W - 2 * pad) / bw, (H - 2 * pad) / bh);
     let ox = (W - bw * s) / 2;
     let oy = (H - bh * s) / 2;
-    if (o.measure) {
+    if (measure) {
       // zoom out if the dimension lines around the pocket's box would run off the pane (a diagonal tool near
       // the paper's edge): fit the sheet and the box plus the dimension margin
       const { margin } = measureLayout(W, H, dpr);
-      const pts = boxOnSheet(o.measure);
+      const pts = boxOnSheet(measure);
       const x0 = Math.min(bx0, ...pts.map((q) => q[0])), x1 = Math.max(bx1, ...pts.map((q) => q[0]));
       const y0 = Math.min(by0, ...pts.map((q) => q[1])), y1 = Math.max(by1, ...pts.map((q) => q[1]));
       const px0 = Math.min(...pts.map((q) => q[0])), px1 = Math.max(...pts.map((q) => q[0]));
@@ -234,25 +237,29 @@ export class TraceView {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     const halo = 'rgba(255,255,255,.7)'; // the paper is light in both themes
-    path(o.sheetPocket);
-    ctx.lineWidth = 4 * dpr;
-    ctx.strokeStyle = halo;
-    ctx.stroke();
-    ctx.fillStyle = rgba(cPocket, 0.14);
-    ctx.fill();
-    ctx.lineWidth = 2 * dpr;
-    ctx.strokeStyle = cPocket;
-    ctx.stroke();
-    path(o.sheetTool);
-    ctx.lineWidth = 3.5 * dpr;
-    ctx.strokeStyle = halo;
-    ctx.stroke();
-    ctx.lineWidth = 1.6 * dpr;
-    ctx.strokeStyle = cTool;
-    ctx.stroke();
-    flat.parentElement!.classList.toggle('has-axis', !!o.sheetAxis);
-    if (o.sheetAxis) {
-      const [[ax, ay], [bx, by]] = o.sheetAxis;
+    for (const q of parts) {
+      path(q.sheetPocket);
+      ctx.lineWidth = 4 * dpr;
+      ctx.strokeStyle = halo;
+      ctx.stroke();
+      ctx.fillStyle = rgba(cPocket, 0.14);
+      ctx.fill();
+      ctx.lineWidth = 2 * dpr;
+      ctx.strokeStyle = cPocket;
+      ctx.stroke();
+    }
+    for (const q of parts) {
+      path(q.sheetTool);
+      ctx.lineWidth = 3.5 * dpr;
+      ctx.strokeStyle = halo;
+      ctx.stroke();
+      ctx.lineWidth = 1.6 * dpr;
+      ctx.strokeStyle = cTool;
+      ctx.stroke();
+    }
+    const axes = parts.flatMap((q) => (q.sheetAxis ? [q.sheetAxis] : []));
+    flat.parentElement!.classList.toggle('has-axis', axes.length > 0);
+    for (const [[ax, ay], [bx, by]] of axes) {
       ctx.beginPath();
       ctx.moveTo(ox + (ax - bx0) * s, oy + (ay - by0) * s);
       ctx.lineTo(ox + (bx - bx0) * s, oy + (by - by0) * s);
@@ -266,12 +273,12 @@ export class TraceView {
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    if (o.measure) {
-      const [[a, b, c], [d, e, f]] = o.measure.up2sheet;
-      drawMeasure(ctx, o.measure, ([x, y]) => [ox + (a * x + b * y + c - bx0) * s, oy + (d * x + e * y + f - by0) * s],
+    if (measure) {
+      const [[a, b, c], [d, e, f]] = measure.up2sheet;
+      drawMeasure(ctx, measure, ([x, y]) => [ox + (a * x + b * y + c - bx0) * s, oy + (d * x + e * y + f - by0) * s],
         W, H, dpr);
     }
-    flat.parentElement!.classList.toggle('has-measure', !!o.measure);
+    flat.parentElement!.classList.toggle('has-measure', !!measure);
     flat.parentElement!.classList.add('ready');
   }
 }

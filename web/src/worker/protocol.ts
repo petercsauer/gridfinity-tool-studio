@@ -1,7 +1,9 @@
 // Typed request/response protocol between the UI thread and the pipeline worker.
 // Every request carries a per-kind `version`; the client drops responses to requests
 // that a newer request of the same kind has superseded.
+import type { LayoutWarning } from '../geometry/kit-checks';
 import type { Box2, Ring, Vec2 } from '../geometry/pocket';
+import type { Layout, Part } from '../kit';
 import type { Params } from '../params';
 import type { Affine } from '../vision/outline';
 import type { Box, RGBAImage } from '../vision/sheet';
@@ -13,11 +15,33 @@ export interface ToolInfo {
   sym: boolean;
 }
 
-export interface OutlineResult {
-  /** Tool and pocket rings in the rotated outline frame (mm). */
+/** One part of the kit as traced and placed. */
+export interface PartTrace {
+  id: string;
+  /** Tool and pocket rings in the part's own upright frame (mm); the placement turns and moves them. */
   tool: Ring;
   pocket: Ring;
-  /** Tool and pocket (unrotated) in sheet mm, for drawing on the sheet image. */
+  /** Tool and pocket where the part lay on the sheet (sheet mm). */
+  sheetTool: Ring;
+  sheetPocket: Ring;
+  /** With the part's "Symmetric" on: its mirror axis as a segment spanning it, in sheet mm. */
+  sheetAxis?: [Vec2, Vec2];
+  /** How symmetric the part is (mirror IoU, 1 = perfectly) and the angle of the axis it snaps by (degrees
+   * from the part frame's y axis). */
+  symmetryScore: number;
+  axisDeg: number;
+  measure: Measurements;
+}
+
+export interface OutlineResult {
+  /** Every part of the kit (hidden ones included), in layout order. */
+  parts: PartTrace[];
+  /** The layout the result was made for: the one requested, clamped, or the kit's initial layout. */
+  layout: Layout;
+  /** The first visible part's tool and pocket, placed in the bin (mm). */
+  tool: Ring;
+  pocket: Ring;
+  /** The first visible part's tool and pocket in sheet mm, for drawing on the sheet image. */
   sheetTool: Ring;
   sheetPocket: Ring;
   /** With "Symmetric tool" on: the mirror axis as a segment spanning the tool, in sheet mm. */
@@ -38,7 +62,11 @@ export interface OutlineResult {
   symmetryScore: number;
   /** Pocket and tool sizes along the tool's own upright axes, for the dimension labels on the trace. */
   measure?: Measurements;
+  /** Overlapping pockets, too-thin walls between pockets and pockets outside a locked bin (see checkLayout). */
+  warnings?: LayoutWarning[];
 }
+
+export type { LayoutWarning };
 
 /** The unrotated pocket and tool measured in the upright outline frame (x across the tool, y along it). */
 export interface Measurements {
@@ -59,26 +87,22 @@ export interface BuildResult {
   /** Bin mesh in mm, Z up: xyz per vertex and three vertex indices per triangle. */
   positions: Float32Array;
   indices: Uint32Array;
+  /** The deepest pocket cut, and each layout placement's (0 for hidden ones), in layout order. */
   effectiveDepth: number;
+  effectiveDepths?: number[];
   nx: number;
   ny: number;
 }
 
 export interface UploadResult extends ToolInfo {
-  /** Upright, centred tool outline (mm), 720 points, last repeats the first. */
-  outline: Ring;
-  /** Size [w, h] of the upright crop the outline is centred in (mm). */
-  crop: [number, number];
-  /** 2x3 affine [A | b] from outline mm to sheet mm: sheet = A q + b. */
-  up2sheet: Affine;
-  /** The symmetric version of the outline and how symmetric the tool is (mirror IoU, 1 = perfectly). */
-  symmetry: { outline: Ring; score: number; axisDeg: number; offset: number };
-  /** JPEG of the perspective-corrected sheet the tool was shot on, and its sheet-mm extent [x0, y0, x1, y1]. */
+  /** Every part traced on the sheet, ordered by where it lay (rows top to bottom, then left to right). */
+  parts: Part[];
+  /** JPEG of the perspective-corrected sheet the kit was shot on, and its sheet-mm extent [x0, y0, x1, y1]. */
   sheetViewJpeg: Blob;
   sheetBox: Box;
 }
 
-/** An uploaded tool as the worker needs it: the upload result with the sheet view as a URL (an object URL the
+/** An uploaded kit as the worker needs it: the upload result with the sheet view as a URL (an object URL the
  * UI thread created for `sheetViewJpeg`) instead of the image itself. */
 export type StoredTool = Omit<UploadResult, 'sheetViewJpeg'> & { sheetImage: string };
 
@@ -95,8 +119,9 @@ export interface Requests {
   /** Where the static assets (presets/) live; sent once before anything else. */
   configure: { assetBase: string };
   listTools: Record<string, never>;
-  outline: { params: Params };
-  build: { params: Params };
+  /** Without a layout the tool's initial layout is used (see kit.ts initialLayout). */
+  outline: { params: Params; layout?: Layout };
+  build: { params: Params; layout?: Layout };
   /** A photo decoded on the UI thread (decodePhoto); send its pixel buffer as a transferable. */
   upload: { image: RGBAImage; name: string };
   /** Make an uploaded tool (restored from storage or just uploaded) available to outline and build. */
@@ -121,10 +146,10 @@ export type Request<K extends Kind = Kind> = K extends Kind
   : never;
 
 /** `no-sheet`: the calibration markers weren't all found; `no-tool`: nothing on the sheet; `cut-off`: part of
- * the tool is outside the photo; `model`: the background-removal model couldn't be downloaded or run;
- * `memory`: the browser ran out of memory. */
+ * a tool is outside the photo; `too-many-parts`: more parts on the sheet than a kit can hold; `model`: the
+ * background-removal model couldn't be downloaded or run; `memory`: the browser ran out of memory. */
 export type ErrorCode = 'not-implemented' | 'unknown-tool' | 'too-large' | 'invalid' | 'no-sheet' | 'no-tool' | 'cut-off'
-  | 'model' | 'memory' | 'internal';
+  | 'too-many-parts' | 'model' | 'memory' | 'internal';
 
 /** Whether an error looks like the browser running out of memory: a failed ArrayBuffer or WebAssembly memory
  * allocation, an Emscripten OOM abort, or onnxruntime failing to allocate a tensor. Checks the message too,

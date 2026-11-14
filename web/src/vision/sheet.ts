@@ -191,14 +191,16 @@ export interface SheetView {
   box: Box;
 }
 
-/** The whole perspective-corrected sheet the tool was shot on: the marker hull plus the quiet zone and a margin,
- * widened if the tool (`outlineSheetMm`, in sheet mm) hangs past it. */
-export async function renderSheetView(img: RGBAImage, H: Homography, outlineSheetMm: readonly Point[], pxPerMm = 4): Promise<SheetView> {
+/** The whole perspective-corrected sheet the parts were shot on: the marker hull plus the quiet zone and a
+ * margin, widened if any part (`outlinesSheetMm`, one ring each in sheet mm) hangs past it. */
+export async function renderSheetView(img: RGBAImage, H: Homography, outlinesSheetMm: readonly (readonly Point[])[],
+  pxPerMm = 4): Promise<SheetView> {
   const cv = await getCv();
   const mk = Object.values(SHEET.markers).flat();
   const m = 0.18 * SHEET.markerEdgeMm + 3;
-  const xs = outlineSheetMm.map((p) => p[0]);
-  const ys = outlineSheetMm.map((p) => p[1]);
+  const pts = outlinesSheetMm.flat();
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
   const box = [
     Math.min(Math.min(...mk.map((p) => p[0])) - m, Math.min(...xs) - 6),
     Math.min(Math.min(...mk.map((p) => p[1])) - m, Math.min(...ys) - 6),

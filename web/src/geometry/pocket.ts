@@ -55,6 +55,12 @@ export interface Box2 {
   ymax: number;
 }
 
+/** One ring or several, as a list of rings. */
+export function asRings(P: Ring | readonly Ring[]): Ring[] {
+  if (!P.length) return [];
+  return Array.isArray(P[0]![0]) ? [...(P as readonly Ring[])] : [P as Ring];
+}
+
 export function bounds(P: Ring): Box2 {
   const b = { xmin: Infinity, ymin: Infinity, xmax: -Infinity, ymax: -Infinity };
   for (const [x, y] of P) {
@@ -153,10 +159,10 @@ export function makePocket(m: ManifoldToplevel, P: Ring, p: PocketParams): Pocke
 /** Bin footprint [nx, ny] in grid units that holds the pocket with its top round-over:
  * per axis `need = extent + 2*fillet + 2*(LIP_INSET + MIN_WALL) + GAP`, `n = ceil(need / GRID)`.
  * With `halfGrid` the footprint grows in half cells instead (`n = ceil(need / (GRID / 2)) / 2`, so 1.5, 2.5…).
- * Either way the bin's outer size is `GRID * n - GAP`. */
-export function footprint(pocket: Ring, fillet: number, halfGrid = false): [number, number] {
+ * Either way the bin's outer size is `GRID * n - GAP`. Several pockets are measured by their combined extent. */
+export function footprint(pocket: Ring | readonly Ring[], fillet: number, halfGrid = false): [number, number] {
   const margin = 2 * Math.max(0, fillet) + 2 * (LIP_INSET + MIN_WALL) + GAP;
-  const b = bounds(pocket);
+  const b = bounds(asRings(pocket).flat());
   const cells = (need: number) => (halfGrid ? Math.ceil(need / (GRID / 2)) / 2 : Math.ceil(need / GRID));
   return [cells(b.xmax - b.xmin + margin), cells(b.ymax - b.ymin + margin)];
 }

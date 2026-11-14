@@ -1,5 +1,6 @@
 // Built-in presets: static JSON written by scripts/build_presets.py into public/presets/.
 import type { Ring, Vec2 } from '../geometry/pocket';
+import type { Part } from '../kit';
 import { centroid } from '../vision/symmetry';
 import { PipelineError, type StoredTool, type ToolInfo } from './protocol';
 
@@ -21,6 +22,30 @@ export interface PresetData {
   sheet_box_mm: [number, number, number, number];
   /** File name of the sheet image, next to the JSON (or, for uploads, the image's object URL). */
   sheet_image: string;
+  /** Every part of a kit with several; without it the tool is the one part described above. */
+  parts?: Part[];
+}
+
+/** A preset's single tool as a kit part. */
+export function partFromPreset(p: PresetData, id = 'p1'): Part {
+  return {
+    id,
+    outline: p.outline_mm,
+    crop: p.crop_mm,
+    up2sheet: p.up2sheet,
+    symmetry: {
+      outline: p.symmetric_outline_mm,
+      score: p.symmetry_score,
+      axisDeg: p.symmetry_axis?.deg ?? 0,
+      offset: p.symmetry_axis?.offset ?? 0,
+      centre: p.symmetry_axis?.centre ?? centroid(p.outline_mm),
+    },
+  };
+}
+
+/** The parts of a preset or upload: its own list, or its single tool as one part. */
+export function partsOf(p: PresetData): Part[] {
+  return p.parts?.length ? p.parts : [partFromPreset(p)];
 }
 
 export interface PresetSource {
@@ -36,20 +61,23 @@ export interface ToolSource extends PresetSource {
   remove(id: string): void;
 }
 
-/** An uploaded tool in the preset format. */
+/** An uploaded kit in the preset format: its first part as the single tool, and every part. */
 export function uploadAsPreset(t: StoredTool): PresetData {
+  const [first] = t.parts;
+  if (!first) throw new PipelineError('invalid', `The upload "${t.label}" has no parts.`);
   return {
     id: t.id,
     label: t.label,
     sym: t.sym,
-    crop_mm: t.crop,
-    outline_mm: t.outline,
-    symmetric_outline_mm: t.symmetry.outline,
-    symmetry_score: t.symmetry.score,
-    symmetry_axis: { deg: t.symmetry.axisDeg, offset: t.symmetry.offset, centre: centroid(t.outline) },
-    up2sheet: t.up2sheet,
+    crop_mm: first.crop,
+    outline_mm: first.outline,
+    symmetric_outline_mm: first.symmetry.outline,
+    symmetry_score: first.symmetry.score,
+    symmetry_axis: { deg: first.symmetry.axisDeg, offset: first.symmetry.offset, centre: first.symmetry.centre },
+    up2sheet: first.up2sheet,
     sheet_box_mm: t.sheetBox,
     sheet_image: t.sheetImage,
+    parts: t.parts,
   };
 }
 

@@ -9,6 +9,7 @@ describe('upload error buckets', () => {
     [new PipelineError('no-sheet', 'x'), false, 'upload-no-sheet'],
     [new PipelineError('no-tool', 'x'), false, 'upload-no-tool'],
     [new PipelineError('cut-off', 'x'), false, 'upload-cut-off'],
+    [new PipelineError('too-many-parts', 'x'), false, 'upload-too-many'],
     [new PipelineError('invalid', 'This file could not be read as an image.'), true, 'upload-error-decode'],
     [new PipelineError('invalid', 'This HEIC photo could not be converted.'), true, 'upload-error-decode'],
     [new PipelineError('model', "Couldn't download the background-removal model (HTTP 503)."), false, 'upload-error-model'],
@@ -37,6 +38,14 @@ describe('upload error buckets', () => {
     'does not mistake %s for out of memory', (msg) => {
       expect(isOutOfMemory(new Error(msg))).toBe(false);
     });
+
+  it('counts too many parts in its own bucket, with a public/e file and an event-counts.sh row', () => {
+    expect(uploadErrorEvent(new PipelineError('too-many-parts', 'x'), false)).toBe('upload-too-many');
+    const file = fileURLToPath(new URL('../public/e/upload-too-many.txt', import.meta.url));
+    expect(readFileSync(file, 'utf-8').trim()).toBe('ok');
+    const script = readFileSync(fileURLToPath(new URL('../../scripts/event-counts.sh', import.meta.url)), 'utf-8');
+    expect(script).toContain('"upload-too-many"');
+  });
 
   it('has a public/e file and an event-counts.sh row for every event', () => {
     const src = readFileSync(fileURLToPath(new URL('./count.ts', import.meta.url)), 'utf-8');

@@ -62,10 +62,10 @@ function addToolOption(t: ToolInfo, parent: HTMLElement = toolMenu): void {
 const isUpload = (id: string) => sheetUrls.has(id);
 /** Make an upload selectable: register it with the worker and add it to the menu. */
 function addUploadTool(u: UploadResult): void {
-  const { sheetViewJpeg, ...rest } = u;
-  const sheetImage = URL.createObjectURL(sheetViewJpeg);
+  const sheetImage = URL.createObjectURL(u.sheetViewJpeg);
   sheetUrls.set(u.id, sheetImage);
-  void client.request('addTool', { tool: { ...rest, sheetImage } });
+  const { id, label, sym, parts, sheetBox } = u;
+  void client.request('addTool', { tool: { id, label, sym, parts, sheetBox, sheetImage } });
   tools.push({ id: u.id, label: u.label, sym: u.sym });
   addToolOption(u, uploadGroup);
   if (!uploadGroup.isConnected) toolMenu.appendChild(uploadGroup);
@@ -420,7 +420,7 @@ async function refreshOutline(): Promise<void> {
   $('cells').textContent = `${r.nx}×${r.ny}`; // half cells show as 1.5, 2.5…
   $('pdim').textContent = `${r.w}×${r.h} mm`;
   $('bdim').textContent = `${binSize(r.nx).toFixed(0)}×${binSize(r.ny).toFixed(0)}×${(p.u * 7).toFixed(0)} mm`;
-  const m = r.measure;
+  const m = r.parts.length === 1 ? r.measure : undefined;
   $('pocketDims').textContent = m
     ? `Pocket ${m.pocketSize[0].toFixed(1)} × ${m.pocketSize[1].toFixed(1)} mm · tool ${m.toolSize[0].toFixed(1)} × ${m.toolSize[1].toFixed(1)} mm`
     : '';
@@ -639,8 +639,9 @@ async function uploadPhoto(file: File): Promise<void> {
   dropped.forEach(dropUploadTool);
   addUploadTool(t);
   selectTool(t.id);
-  say(saved ? `Added “${t.label}”. Turn on “Symmetric tool” if it is.`
-    : `Added “${t.label}” for this visit; this browser couldn't save it.`, 'ok');
+  const added = t.parts.length > 1 ? `Added “${t.label}” with ${t.parts.length} parts` : `Added “${t.label}”`;
+  say(saved ? `${added}. Turn on “Symmetric tool” if it is.`
+    : `${added} for this visit; this browser couldn't save it.`, 'ok');
 }
 upBtn.addEventListener('click', () => input('upFile').click());
 input('upFile').addEventListener('change', async () => {

@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { ManifoldToplevel } from 'manifold-3d';
+import type { Manifold, ManifoldToplevel } from 'manifold-3d';
 import { initManifold } from './manifold';
-import { genbin, genbinManifold, liveObjects, type BinParams } from './bin';
+import { genbin, genbinManifold, liveObjects, type BinParams, type PocketCut } from './bin';
 import { bounds, maxDepth, type Ring } from './pocket';
 import { presetFixture, TOOLS } from '../test/fixtures';
 import { DEFAULTS } from '../params';
@@ -24,6 +24,15 @@ function centred(P: Ring): Ring {
   const b = bounds(P);
   return P.map(([x, y]) => [x - (b.xmin + b.xmax) / 2, y - (b.ymin + b.ymax) / 2]);
 }
+
+/** Vertex count and volume of each fixture bin with bfillet 1 and both base holes, as cut before pockets had
+ * their own depths (c5b57b8). */
+const SINGLE_CUT: Record<(typeof TOOLS)[number], [number, number]> = {
+  needlenose: [67286, 223562.68481249735],
+  combopliers: [72138, 344554.05245921994],
+  flushcutter: [69620, 277182.377370868],
+  stripper: [73862, 411199.66135931615],
+};
 
 describe.each(TOOLS)('bin parity: %s', (tool) => {
   const fx = presetFixture(tool);
@@ -54,6 +63,125 @@ describe.each(TOOLS)('bin parity: %s', (tool) => {
     }
     expect(r.effectiveDepth).toBeCloseTo(fx.bin.effective_depth, 4);
     expect([r.nx, r.ny]).toEqual(fx.footprint);
+  });
+
+  it('cuts one pocket with its own depth exactly as a single pocket was cut before per-part depths', () => {
+    // with a bottom round and every base hole, where one batch difference would change the mesh
+    const r = genbin(m, [{ ring: centred(fx.pocket_mm), depth: p.depth }], nx, ny, { ...p, depth: 0, bfillet: 1, holes: 'both' });
+    const [vertices, volume] = SINGLE_CUT[tool];
+    expect(r.positions.length / 3).toBe(vertices);
+    expect(Math.abs(r.volume - volume)).toBeLessThanOrEqual(1e-9);
+    expect(r.effectiveDepths).toHaveLength(1);
+    expect(r.effectiveDepths[0]).toBeCloseTo(Math.min(p.depth, maxDepth(p.u, { holes: 'both' })), 9);
+  });
+});
+
+describe('several pockets', () => {
+  const rect = (x0: number, y0: number, w: number, h: number): Ring => [[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h]];
+  const p: BinParams = { u: 4, depth: 12, fillet: 2, bfillet: 0.5 };
+  const volume = (pockets: Ring[]) => genbin(m, pockets, 3, 2, p).volume;
+
+  it('cuts one ring and a list of that one ring identically', () => {
+    const fx = presetFixture('needlenose');
+    const ring = centred(fx.pocket_mm);
+    const a = genbin(m, ring, fx.footprint[0], fx.footprint[1], { ...p, fillet: 3.175 });
+    const b = genbin(m, [ring], fx.footprint[0], fx.footprint[1], { ...p, fillet: 3.175 });
+    expect(b.volume).toBe(a.volume);
+    expect(b.indices.length).toBe(a.indices.length);
+    expect(b.positions).toEqual(a.positions);
+  });
+
+  it('cuts disjoint pockets independently: removals add up', () => {
+    const A = rect(-50, -20, 30, 40);
+    const B = rect(10, -15, 40, 20);
+    const none = volume([]);
+    const removed = (pockets: Ring[]) => none - volume(pockets);
+    expect(removed([A, B])).toBeCloseTo(removed([A]) + removed([B]), 0);
+    const { bin } = genbinManifold(m, [A, B], 3, 2, p);
+    try {
+      expect(bin.status()).toBe('NoError');
+      expect(bin.genus()).toBe(0);
+    } finally {
+      bin.delete();
+    }
+    expect(liveObjects()).toBe(0);
+  });
+
+  it('merges overlapping pockets into one', () => {
+    const A = rect(-40, -15, 50, 30);
+    const B = rect(0, -15, 40, 30);
+    expect(volume([A, B])).toBeCloseTo(volume([rect(-40, -15, 80, 30)]), 0);
+    expect(liveObjects()).toBe(0);
+  });
+});
+
+describe('pockets at their own depths', () => {
+  const rect = (x0: number, y0: number, w: number, h: number): Ring => [[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h]];
+  /** Area of the bin's cross-section at height z (the final vertex merge shifts it by under 0.1 mm²). */
+  const sliceArea = (bin: Manifold, z: number) => {
+    const cs = bin.slice(z);
+    try {
+      return cs.area();
+    } finally {
+      cs.delete();
+    }
+  };
+  /** Builds the bin and passes it to `check`, then frees it. */
+  const withBin = <T>(cuts: PocketCut[], nx: number, ny: number, p: BinParams, check: (b: ReturnType<typeof genbinManifold>) => T): T => {
+    const r = genbinManifold(m, cuts, nx, ny, p);
+    try {
+      return check(r);
+    } finally {
+      r.bin.delete();
+    }
+  };
+
+  it('cuts two disjoint pockets 10 and 25 mm deep, each to its own floor', () => {
+    // 5U: the shortest bin a 25 mm pocket fits in (4U holds 18 mm)
+    const p: BinParams = { u: 5, depth: 0, fillet: 1, bfillet: 0.5 };
+    const recessZ = 5 * 7 - 4.4;
+    const shallow = rect(-30, -10, 20, 20);
+    const deep = rect(10, -10, 20, 20);
+    const empty = withBin([], 2, 1, p, ({ bin }) => sliceArea(bin, recessZ - 15));
+    withBin([{ ring: shallow, depth: 10 }, { ring: deep, depth: 25 }], 2, 1, p, ({ bin, effectiveDepths, effectiveDepth }) => {
+      expect(effectiveDepths).toEqual([10, 25]);
+      expect(effectiveDepth).toBe(25);
+      expect(bin.status()).toBe('NoError');
+      expect(bin.genus()).toBe(0);
+      // 15 mm down only the deep pocket is open
+      expect(empty - sliceArea(bin, recessZ - 15)).toBeCloseTo(400, 0);
+      expect(empty - sliceArea(bin, recessZ - 5)).toBeCloseTo(800, 0);
+    });
+    expect(liveObjects()).toBe(0);
+  });
+
+  it('gives overlapping pockets of different depths the deeper floor where they overlap', () => {
+    const p: BinParams = { u: 4, depth: 0, fillet: 1, bfillet: 0.5 };
+    const recessZ = 4 * 7 - 4.4;
+    const A = rect(-30, -10, 40, 20);
+    const B = rect(0, -10, 30, 20);
+    const empty = withBin([], 2, 1, p, ({ bin }) => sliceArea(bin, recessZ - 10));
+    const emptyTop = withBin([], 2, 1, p, ({ bin }) => sliceArea(bin, recessZ - 3));
+    withBin([{ ring: A, depth: 6 }, { ring: B, depth: 15 }], 2, 1, p, ({ bin, effectiveDepths }) => {
+      expect(effectiveDepths).toEqual([6, 15]);
+      expect(bin.status()).toBe('NoError');
+      expect(bin.genus()).toBe(0);
+      const parts = bin.decompose();
+      expect(parts.length).toBe(1);
+      parts.forEach((x) => x.delete());
+      // below A's floor, all of B (overlap included) is open; above it, both
+      expect(empty - sliceArea(bin, recessZ - 10)).toBeCloseTo(30 * 20, 0);
+      expect(emptyTop - sliceArea(bin, recessZ - 3)).toBeCloseTo(60 * 20, 0);
+    });
+    expect(liveObjects()).toBe(0);
+  });
+
+  it('clamps each depth to what the bin holds', () => {
+    const p: BinParams = { u: 3, depth: 0, fillet: 0, bfillet: 0 };
+    withBin([{ ring: rect(-15, -10, 10, 20), depth: 4 }, { ring: rect(5, -10, 10, 20), depth: 40 }], 1, 1, p, (r) => {
+      expect(r.effectiveDepths).toEqual([4, maxDepth(3)]);
+      expect(r.effectiveDepth).toBeCloseTo(maxDepth(3), 9);
+    });
   });
 });
 

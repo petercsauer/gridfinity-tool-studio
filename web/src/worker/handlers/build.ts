@@ -1,23 +1,28 @@
-// The 3D bin: the pocket for the current parameters, centred, cut into a gridfinity bin.
+// The 3D bin: the kit's pockets for the current parameters and layout, each cut at its own depth into a
+// gridfinity bin of the layout's locked size or one that fits them.
 import { genbin } from '../../geometry/bin';
-import { bounds, footprint, makePocket, rotate } from '../../geometry/pocket';
+import type { Layout } from '../../kit';
 import { clampParams, MAX_CELLS, type Params } from '../../params';
 import type { Deps } from '../deps';
 import { PipelineError, type BuildResult } from '../protocol';
+import { binLayout, placeKit } from './placed';
 
-export async function build(raw: Params, { manifold, presets }: Deps): Promise<BuildResult> {
+export async function build(raw: Params, { manifold, presets }: Deps, layout?: Layout): Promise<BuildResult> {
   const p = clampParams(raw);
-  const preset = await presets.get(p.tool);
-  const P0 = p.sym ? preset.symmetric_outline_mm : preset.outline_mm;
-  const { pocket } = makePocket(manifold, rotate(P0, p.rot), p);
-  const [nx, ny] = footprint(pocket, p.fillet, p.halfGrid);
+  const kit = placeKit(manifold, await presets.get(p.tool), p, layout);
+  const { nx, ny, pockets } = binLayout(kit, p);
   if (nx > MAX_CELLS || ny > MAX_CELLS) {
     throw new PipelineError('too-large', `This tool needs a ${nx}×${ny} bin; the largest is ${MAX_CELLS}×${MAX_CELLS}.`);
   }
-  const b = bounds(pocket);
-  const cx = (b.xmin + b.xmax) / 2;
-  const cy = (b.ymin + b.ymax) / 2;
-  const centred = pocket.map(([x, y]) => [x - cx, y - cy] as [number, number]);
-  const bin = genbin(manifold, centred, nx, ny, p);
-  return { positions: bin.positions, indices: bin.indices, effectiveDepth: bin.effectiveDepth, nx, ny };
+  const cuts = pockets.map((ring, i) => ({ ring, depth: kit.visible[i]!.placement.depth }));
+  const bin = genbin(manifold, cuts, nx, ny, p);
+  const depths = new Map(kit.visible.map((q, i) => [q, bin.effectiveDepths[i]!]));
+  return {
+    positions: bin.positions,
+    indices: bin.indices,
+    effectiveDepth: bin.effectiveDepth,
+    effectiveDepths: kit.all.map((q) => depths.get(q) ?? 0),
+    nx,
+    ny,
+  };
 }

@@ -2,7 +2,7 @@
 // Mirrors genbin in src/gts/bin.py (kennetek standard.scad dimensions).
 import type { CrossSection, Manifold, ManifoldToplevel } from 'manifold-3d';
 import { GAP, GRID, HOLE_FROM_SIDE, MAGNET_D, MAGNET_H, SCREW_D, SCREW_H, UHT } from './constants';
-import { baseHoles, ccw, floorMin, recess, signedArea, type HoleStyle, type Ring, type Vec2 } from './pocket';
+import { asRings, baseHoles, ccw, floorMin, recess, signedArea, type HoleStyle, type Ring, type Vec2 } from './pocket';
 
 /** Top radius of the outer wall and the foot pads (bottom, middle, top sizes and radii). The pad sizes are
  * for a 42 mm cell; a foot on a pitch of `p` mm is `GRID - p` smaller (20.5, 16.2 and 14.6 for 21 mm). */
@@ -29,7 +29,7 @@ const SIMPLIFY_TOL = 1e-3;
 export interface BinParams {
   /** Height in 7 mm units. */
   u: number;
-  /** Requested pocket depth below the pocket opening (mm). */
+  /** Requested pocket depth below the pocket opening (mm), for pockets given without their own. */
   depth: number;
   /** Top round-over and bottom round radii (mm). */
   fillet: number;
@@ -47,8 +47,10 @@ export interface BinMesh {
   /** xyz per vertex (mm, Z up) and three vertex indices per triangle. */
   positions: Float32Array;
   indices: Uint32Array;
-  /** The pocket depth actually cut (less than requested when the bin is too low). */
+  /** The pocket depth actually cut (less than requested when the bin is too low): the deepest, and each
+   * cut's in order. */
   effectiveDepth: number;
+  effectiveDepths: number[];
   nx: number;
   ny: number;
   bbox: { min: [number, number, number]; max: [number, number, number] };
@@ -79,10 +81,27 @@ class Scope {
   }
 }
 
-/** The bin as a manifold, and the depth cut. The caller owns (and must delete) the manifold. */
+/** A pocket and its own depth below the pocket opening (mm). */
+export interface PocketCut {
+  ring: Ring;
+  depth: number;
+}
+
+/** Pockets as given to genbin: one ring or several (all at `p.depth`), or cuts with their own depths. */
+export type Pockets = Ring | readonly Ring[] | readonly PocketCut[];
+
+/** The pockets as cuts, rings getting `depth`. */
+function asCuts(pockets: Pockets, depth: number): PocketCut[] {
+  const first = pockets[0];
+  if (first && 'ring' in first) return [...(pockets as readonly PocketCut[])];
+  return asRings(pockets as Ring | readonly Ring[]).map((ring) => ({ ring, depth }));
+}
+
+/** The bin as a manifold, the deepest depth cut and each cut's depth (in `pockets` order). The caller owns
+ * (and must delete) the manifold. */
 export function genbinManifold(
-  m: ManifoldToplevel, pocket: Ring, nx: number, ny: number, p: BinParams,
-): { bin: Manifold; effectiveDepth: number } {
+  m: ManifoldToplevel, pockets: Pockets, nx: number, ny: number, p: BinParams,
+): { bin: Manifold; effectiveDepth: number; effectiveDepths: number[] } {
   const { CrossSection, Manifold } = m;
   const s = new Scope();
   try {
@@ -108,7 +127,6 @@ export function genbinManifold(
     const Dx = GRID * nx - GAP;
     const Dy = GRID * ny - GAP;
     const recessZ = top - recess(p); // the pocket opens at the lip trough floor (or the top, lip off)
-    const floorTop = Math.max(floorMin(p), recessZ - p.depth);
 
     // same vertical profile and radii at any pitch; only the pad sizes shrink with it
     const shrink = GRID - pitch;
@@ -153,49 +171,72 @@ export function genbinManifold(
       }
     }
 
-    // tool pocket, with round-overs that follow the actual outline (stepped offset layers,
-    // no convex hull: a hull would fill the concave jaw/handle gaps)
-    const pk = s.keep(new CrossSection([ccw(pocket)], 'Positive'));
-    const ft = Math.max(0, Math.min(p.fillet, recessZ - floorTop - 0.5)); // top: convex, flares out
-    const fb = Math.max(0, Math.min(p.bfillet, recessZ - floorTop - 0.5)); // bottom: concave, insets in
-    const cutters: Manifold[] = [slab(pk, floorTop + fb, top + 1)];
-    /** A layer of the pocket offset by `delta` (largest part, outer contour only) from za to zb. */
-    const ring = (delta: number, za: number, zb: number): void => {
-      const off = s.keep(pk.offset(delta, 'Round', 2, ROUND_SEGMENTS));
-      let best: CrossSection | undefined;
-      for (const part of off.decompose()) {
-        s.keep(part);
-        if (!best || part.area() > best.area()) best = part;
-      }
-      if (!best || best.area() < 1) return;
-      const outer = s.keep(new CrossSection([outerContour(best)], 'Positive'));
-      cutters.push(slab(outer, za, zb));
-    };
+    // tool pockets, with round-overs that follow the actual outline (stepped offset layers,
+    // no convex hull: a hull would fill the concave jaw/handle gaps); pockets that overlap at the
+    // same floor are one pocket, and where floors differ the deeper one wins
     /** Offset of the circular round-over profile at fraction `i/STEPS` of radius `f`. */
     const law = (f: number, i: number) => {
       const d = (i / STEPS) * f;
       return f - Math.sqrt(Math.max(0, f * f - (f - d) ** 2));
     };
-    if (ft > 0.05) {
-      for (let i = 0; i < STEPS; i++) {
-        const off = law(ft, i);
-        if (off < 1e-3) continue;
-        ring(off, recessZ - ((i + 1) / STEPS) * ft - 0.01, recessZ - (i / STEPS) * ft + 0.01);
+    const cutters: Manifold[] = [];
+    /** Cutters for the pockets `rings` with their floor at `floorTop`, one per pocket: a slab down to the floor
+     * and its round-over layers. */
+    const pocketCutters = (rings: Ring[], floorTop: number): void => {
+      const ft = Math.max(0, Math.min(p.fillet, recessZ - floorTop - 0.5)); // top: convex, flares out
+      const fb = Math.max(0, Math.min(p.bfillet, recessZ - floorTop - 0.5)); // bottom: concave, insets in
+      for (const pk of s.keep(new CrossSection(rings, 'Positive')).decompose()) {
+        s.keep(pk);
+        const own: Manifold[] = [slab(pk, floorTop + fb, top + 1)];
+        /** A layer of the pocket offset by `delta` (largest part, outer contour only) from za to zb. */
+        const ring = (delta: number, za: number, zb: number): void => {
+          const off = s.keep(pk.offset(delta, 'Round', 2, ROUND_SEGMENTS));
+          let best: CrossSection | undefined;
+          for (const part of off.decompose()) {
+            s.keep(part);
+            if (!best || part.area() > best.area()) best = part;
+          }
+          if (!best || best.area() < 1) return;
+          const outer = s.keep(new CrossSection([outerContour(best)], 'Positive'));
+          own.push(slab(outer, za, zb));
+        };
+        if (ft > 0.05) {
+          for (let i = 0; i < STEPS; i++) {
+            const off = law(ft, i);
+            if (off < 1e-3) continue;
+            ring(off, recessZ - ((i + 1) / STEPS) * ft - 0.01, recessZ - (i / STEPS) * ft + 0.01);
+          }
+        }
+        if (fb > 0.05) {
+          for (let i = 0; i < STEPS; i++) {
+            ring(-law(fb, i), floorTop + (i / STEPS) * fb - 0.01, floorTop + ((i + 1) / STEPS) * fb + 0.01);
+          }
+        }
+        cutters.push(s.keep(Manifold.union(own)));
       }
+    };
+    const floorOf = (depth: number) => Math.max(floorMin(p), recessZ - depth);
+    const cuts = asCuts(pockets, p.depth).map((c) => ({ ring: ccw(c.ring), floorTop: floorOf(c.depth) }));
+    // pockets with the same floor are cut together, so overlapping ones get one round-over
+    for (const f of new Set(cuts.map((c) => c.floorTop))) {
+      pocketCutters(cuts.filter((c) => c.floorTop === f).map((c) => c.ring), f);
     }
-    if (fb > 0.05) {
-      for (let i = 0; i < STEPS; i++) {
-        ring(-law(fb, i), floorTop + (i / STEPS) * fb - 0.01, floorTop + ((i + 1) / STEPS) * fb + 0.01);
-      }
-    }
-    const cutter = s.keep(Manifold.union(cutters));
     const shell = lip ? s.keep(solid.subtract(lip)) : solid;
-    const cut = holeCutters.length ? s.keep(Manifold.union([cutter, ...holeCutters])) : cutter;
-    const raw = s.keep(shell.subtract(cut));
+    let raw: Manifold;
+    if (cutters.length === 1) {
+      // one pocket: holes and pocket unioned, then subtracted, as the single-pocket bin always was (same mesh)
+      const cut = holeCutters.length ? s.keep(Manifold.union([cutters[0]!, ...holeCutters])) : cutters[0]!;
+      raw = s.keep(shell.subtract(cut));
+    } else {
+      // several: one batch difference (BatchBoolean) of the pockets' own cutters and the holes
+      raw = s.keep(Manifold.difference([shell, ...cutters, ...holeCutters]));
+    }
     // merge near-coincident vertices left where the stepped round-over layers meet; without
     // this, STL readers that weld vertices by position see zero-volume slivers
     const bin = raw.simplify(SIMPLIFY_TOL);
-    return { bin, effectiveDepth: Math.max(0, recessZ - floorTop) };
+    const effectiveDepths = cuts.map((c) => Math.max(0, recessZ - c.floorTop));
+    const effectiveDepth = cuts.length ? Math.max(...effectiveDepths) : Math.max(0, recessZ - floorOf(p.depth));
+    return { bin, effectiveDepth, effectiveDepths };
   } finally {
     s.free();
   }
@@ -216,10 +257,10 @@ function outerContour(cs: CrossSection): Vec2[] {
   return ccw(best);
 }
 
-/** Build an `nx` x `ny` cell, `u`-unit bin with `pocket` (mm, centred on the origin) cut below
- * the stacking-lip recess, as triangle arrays. The depth is limited to maxDepth(u, p). */
-export function genbin(m: ManifoldToplevel, pocket: Ring, nx: number, ny: number, p: BinParams): BinMesh {
-  const { bin, effectiveDepth } = genbinManifold(m, pocket, nx, ny, p);
+/** Build an `nx` x `ny` cell, `u`-unit bin with `pockets` (mm, centred on the origin) cut below the stacking-lip
+ * recess, as triangle arrays. Each depth is limited to maxDepth(u, p). */
+export function genbin(m: ManifoldToplevel, pockets: Pockets, nx: number, ny: number, p: BinParams): BinMesh {
+  const { bin, effectiveDepth, effectiveDepths } = genbinManifold(m, pockets, nx, ny, p);
   try {
     const mesh = bin.getMesh();
     const np = mesh.numProp;
@@ -235,6 +276,7 @@ export function genbin(m: ManifoldToplevel, pocket: Ring, nx: number, ny: number
       positions,
       indices: Uint32Array.from(mesh.triVerts),
       effectiveDepth,
+      effectiveDepths,
       nx,
       ny,
       bbox: { min: [box.min[0], box.min[1], box.min[2]], max: [box.max[0], box.max[1], box.max[2]] },

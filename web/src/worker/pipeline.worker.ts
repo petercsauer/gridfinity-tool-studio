@@ -33,9 +33,9 @@ async function handle(req: Request): Promise<Results[Request['kind']]> {
     case 'listTools':
       return configured().list();
     case 'outline':
-      return outline(req.params, await deps());
+      return outline(req.params, await deps(), req.layout);
     case 'build':
-      return build(req.params, await deps());
+      return build(req.params, await deps(), req.layout);
     case 'upload': {
       const post = (progress: ProgressMessage['progress']) => scope.postMessage({ id: req.id, progress } satisfies ProgressMessage);
       const env = workerUploadEnv((loaded, total) => post({ stage: 'model', loaded, total }), (stage) => post({ stage }));
