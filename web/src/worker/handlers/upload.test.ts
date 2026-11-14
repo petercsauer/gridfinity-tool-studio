@@ -90,17 +90,22 @@ interface Blob2D {
 
 const MAGENTA = [255, 0, 255, 255] as const;
 
-/** A flat, top-down "photo" of the stripper's sheet at 4 px/mm with `blobs` painted on it in magenta, cut off
- * by the photo's edge where they run past it. */
+/** A flat, top-down "photo" of the stripper's sheet at 4 px/mm, reaching `reach` (sheet mm) so there is room
+ * for things beside the paper, with the stripper itself painted out (paper grey over its box) and `blobs` painted
+ * on it in magenta, cut off by the photo's edge where they run past it. */
 async function paintedSheet(blobs: readonly Blob2D[], reach: [number, number] = [60, 80]): Promise<RGBAImage> {
   const px = 4;
-  // the photo covers the sheet and `reach` (sheet mm), so there is room for things beside the paper
   const { image, box } = await renderSheetView(presetPhoto('stripper'), sheetFixture('stripper').homography, [[[60, 80], reach]], px);
+  const fx = presetFixture('stripper');
+  const onSheet = apply(fx.up2sheet, fx.outline_mm);
+  const [tx0, ty0] = [Math.min(...onSheet.map((q) => q[0])) - 6, Math.min(...onSheet.map((q) => q[1])) - 6];
+  const [tx1, ty1] = [Math.max(...onSheet.map((q) => q[0])) + 6, Math.max(...onSheet.map((q) => q[1])) + 6];
   const out = new Uint8ClampedArray(image.data);
   for (let y = 0; y < image.height; y++) {
     for (let x = 0; x < image.width; x++) {
       const sx = box[0] + (x + 0.5) / px;
       const sy = box[1] + (y + 0.5) / px;
+      if (sx > tx0 && sx < tx1 && sy > ty0 && sy < ty1) out.set([235, 235, 235, 255], (y * image.width + x) * 4);
       const hit = blobs.find(({ c, size: [w, h], deg }) => {
         const t = (deg * Math.PI) / 180;
         const dx = sx - c[0], dy = sy - c[1];
@@ -114,7 +119,7 @@ async function paintedSheet(blobs: readonly Blob2D[], reach: [number, number] = 
   return { ...image, data: out };
 }
 
-/** Segmentation that keys on the magenta paint (the real tool on the photo isn't magenta, so it's ignored). */
+/** Segmentation that keys on the magenta paint. */
 const magentaEnv: UploadEnv = {
   segment: async ({ width, height, data }) => {
     const m = new Uint8Array(width * height);
@@ -201,8 +206,9 @@ describe('upload of a sheet with several parts', () => {
           const [r, g, b] = [data[i * 4]!, data[i * 4 + 1]!, data[i * 4 + 2]!];
           const magenta = r > 200 && g < 100 && b > 200;
           const cyan = r < 100 && g > 200 && b > 200;
-          // its own crop sees any paint, including the blend resampling leaves where cyan meets yellow
-          const paint = Math.max(r, g, b) - Math.min(r, g, b) > 100;
+          // its own crop sees any of this test's paint, including the green blend resampling leaves where cyan
+          // meets yellow (but not the real stripper's red handles)
+          const paint = Math.max(r, g, b) - Math.min(r, g, b) > 100 && g > 200;
           m[i] = magenta || (call === 1 && cyan) || (call > 2 && paint) ? 255 : 0;
         }
         return { width, height, data: m };
@@ -211,6 +217,29 @@ describe('upload of a sheet with several parts', () => {
     const r = await upload(await paintedSheet(kit), 'kit', deps, env);
     expect(call).toBeGreaterThan(3);
     await expectParts(r, [{ c: [102.5, 70], size: [70, 10], deg: 0 }, kit[2]!]);
+  }, 120000);
+
+  it('finds a dark part the model misses on the whole page from the paper around it', async () => {
+    // a dark 45 x 9 mm bar (an antenna) beside a box: the whole-page segmentation sees only the box, crops
+    // holding the bar see it too
+    const DARK = [30, 30, 32, 255] as const;
+    const kit: Blob2D[] = [{ c: [160, 75], size: [45, 9], deg: 0, color: DARK }, { c: [105, 150], size: [80, 40], deg: 0 }];
+    let call = 0;
+    const env: UploadEnv = {
+      ...magentaEnv,
+      segment: async ({ width, height, data }) => {
+        call++;
+        const m = new Uint8Array(width * height);
+        for (let i = 0; i < m.length; i++) {
+          const [r, g, b] = [data[i * 4]!, data[i * 4 + 1]!, data[i * 4 + 2]!];
+          const magenta = r > 200 && g < 100 && b > 200;
+          const dark = r < 60 && g < 60 && b < 60;
+          m[i] = magenta || (call > 1 && dark) ? 255 : 0;
+        }
+        return { width, height, data: m };
+      },
+    };
+    await expectParts(await upload(await paintedSheet(kit), 'kit', deps, env), kit);
   }, 120000);
 
   /** A model that sees magenta always, cyan in the whole-page pass (1), and all of this file's paint in a part's
@@ -257,10 +286,10 @@ describe('upload of a sheet with several parts', () => {
     const r = await upload(await paintedSheet(kit), 'kit', deps, droppingEnv());
     expect(r.parts).toHaveLength(2);
     // the whole 150 mm, not the 30 mm pass 1 saw (to a millimetre: this test's model takes the paint's blend into
-    // the paper at both ends as paint)
+    // the paper as paint, and straightening moves each long side out to its furthest point)
     const [short, long] = await rectDims(r.parts[1]!.outline);
     expect(Math.abs(long - 150)).toBeLessThanOrEqual(1.25);
-    expect(Math.abs(short - 10)).toBeLessThanOrEqual(0.75);
+    expect(Math.abs(short - 10)).toBeLessThanOrEqual(1);
     const [c] = apply(r.parts[1]!.up2sheet, [await rectCentre(r.parts[1]!.outline)]);
     expect(Math.hypot(c![0] - 105, c![1] - 205)).toBeLessThanOrEqual(1);
   }, 120000);
