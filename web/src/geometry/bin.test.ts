@@ -28,7 +28,7 @@ function centred(P: Ring): Ring {
 /** Vertex count and volume of each fixture bin with bfillet 1 and both base holes, as cut before pockets had
  * their own depths (c5b57b8). */
 /** Volumes (mm³) of each fixture's single-pocket bin (bottom round 1, every base hole) before the round-over
- * layers were simplified to 0.02 mm; the simplified bin stays within 0.02% of them. */
+ * layers were simplified to 0.02 mm; the simplified bin stays within 0.005% of them (it moves under 0.002%, and losing half the bottom round would move it 0.02%). */
 const UNSIMPLIFIED_VOLUME: Record<(typeof TOOLS)[number], number> = {
   needlenose: 223562.68481249735,
   combopliers: 344554.05245921994,
@@ -74,7 +74,7 @@ describe.each(TOOLS)('bin parity: %s', (tool) => {
     const plain = genbin(m, centred(fx.pocket_mm), nx, ny, q);
     expect(r.positions).toEqual(plain.positions);
     expect(r.indices).toEqual(plain.indices);
-    expect(Math.abs(r.volume - UNSIMPLIFIED_VOLUME[tool]) / UNSIMPLIFIED_VOLUME[tool]).toBeLessThan(2e-4);
+    expect(Math.abs(r.volume - UNSIMPLIFIED_VOLUME[tool]) / UNSIMPLIFIED_VOLUME[tool]).toBeLessThan(5e-5);
     expect(r.effectiveDepths).toHaveLength(1);
     expect(r.effectiveDepths[0]).toBeCloseTo(Math.min(p.depth, maxDepth(p.u, { holes: 'both' })), 9);
   });

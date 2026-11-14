@@ -469,7 +469,7 @@ test('layout persists: a moved upload keeps its placement after a reload', async
   await expect.poll(async () => (await sentPlacement(page))?.rot).toBe(90);
   const moved = (await sentPlacement(page))!;
   const stored = () => page.evaluate(() => new Promise<{ x: number; rot: number } | null>((resolve) => {
-    const rq = indexedDB.open('gridfinity-tool-studio');
+    const rq = indexedDB.open('gridfinity-tool-studio-kits');
     rq.onsuccess = () => {
       const all = rq.result.transaction('uploads').objectStore('uploads').getAll();
       all.onsuccess = () => {
@@ -491,8 +491,9 @@ test('layout persists: a moved upload keeps its placement after a reload', async
   await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
 });
 
-// ---- kits with several parts: a two-part kit stored the way storage.ts keeps an upload (schema 2), made from
-// the stud finder and flush cutter presets at 0.3 scale (so they fit a 3×2 bin), photographed 60 mm apart
+// ---- kits with several parts: a two-part kit stored the way storage.ts keeps an upload (schema 2, in the kits'
+// database), made from the stud finder and flush cutter presets at 0.3 scale (so they fit a 3×2 bin),
+// photographed 60 mm apart
 const KIT = 'kit-e2e';
 type PresetJson = {
   outline_mm: number[][]; symmetric_outline_mm: number[][]; crop_mm: number[]; symmetry_score: number;
@@ -525,7 +526,7 @@ async function openKit(page: Page): Promise<void> {
       schema: 2, created: now, used: now,
     };
     await new Promise<void>((resolve, reject) => {
-      const rq = indexedDB.open('gridfinity-tool-studio');
+      const rq = indexedDB.open('gridfinity-tool-studio-kits');
       rq.onerror = () => reject(rq.error);
       rq.onsuccess = () => {
         const tx = rq.result.transaction('uploads', 'readwrite');
@@ -781,7 +782,7 @@ test('kit flow: a two-part photo is arranged, exported as STL and SVG, and kept'
 
   // reloaded: the arrangement is back
   const stored = () => page.evaluate((key) => new Promise<number | null>((resolve) => {
-    const rq = indexedDB.open('gridfinity-tool-studio');
+    const rq = indexedDB.open('gridfinity-tool-studio-kits');
     rq.onsuccess = () => {
       const one = rq.result.transaction('uploads').objectStore('uploads').get(key);
       one.onsuccess = () => {
@@ -803,5 +804,78 @@ test('kit flow: a two-part photo is arranged, exported as STL and SVG, and kept'
   }
   await expect(page.locator('#layoutPane')).toBeVisible();
   await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+  expect(errors).toEqual([]);
+});
+
+test('a kit\'s Mixed controls don\'t carry over to a tool without a layout of its own', async ({ page }) => {
+  const errors = pageErrors(page);
+  await openKit(page);
+  // part 2 without a finger slot: with no part selected, Grab slot is Mixed
+  await page.locator('#partList [role=option]').nth(1).click();
+  await page.locator('#slotOn').uncheck();
+  await page.locator('#scopeClear').click();
+  await expect(page.locator('#slotOn')).toHaveClass(/mixed/);
+  await expect(page.locator('#clearanceV')).not.toHaveText('Mixed');
+  // a preset takes the inspector's own values again: its finger slot is on and nothing reads Mixed
+  await page.locator('#tool').selectOption('groovejoint');
+  await expect(page.locator('#slotOn')).toBeChecked();
+  await expect(page.locator('#slotOn')).not.toHaveClass(/mixed/);
+  for (const id of ['clearanceV', 'slotDV', 'slotFracV', 'depthV']) await expect(page.locator(`#${id}`)).not.toHaveText('Mixed');
+  await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+  expect(errors).toEqual([]);
+});
+
+test('an upload saved by the single-tool version is carried over, and left for that version', async ({ page }) => {
+  const errors = pageErrors(page);
+  await open(page);
+  // a schema-1 record in the old database, as the single-tool version saved it
+  const p = JSON.parse(readFileSync(here('../../tests/fixtures/web-presets/stripper.json'), 'utf-8'));
+  await page.evaluate(async (p) => {
+    const sheetViewJpeg = await (await fetch('presets/studfinder-sheet.jpg')).blob();
+    const record = {
+      id: 'up-legacy1', label: 'Old stripper', sym: false, outline: p.outline_mm, crop: p.crop_mm, up2sheet: p.up2sheet,
+      symmetry: { outline: p.symmetric_outline_mm, score: p.symmetry_score, axisDeg: 0, offset: 0 },
+      sheetViewJpeg, sheetBox: p.sheet_box_mm, schema: 1, created: 1, used: 1,
+    };
+    await new Promise<void>((resolve, reject) => {
+      const rq = indexedDB.open('gridfinity-tool-studio');
+      rq.onupgradeneeded = () => rq.result.createObjectStore('uploads');
+      rq.onerror = () => reject(rq.error);
+      rq.onsuccess = () => {
+        const tx = rq.result.transaction('uploads', 'readwrite');
+        tx.objectStore('uploads').put(record, record.id);
+        tx.oncomplete = () => { rq.result.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+  }, p);
+  await page.reload();
+  await open(page);
+  // it is in the menu, and builds
+  await expect(page.locator('#tool optgroup[label="Your uploads"] option')).toHaveText(['Old stripper']);
+  await page.locator('#tool').selectOption('up-legacy1');
+  await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+  // the old database still has it as it was, so an old tab still open keeps working (and deletes nothing)
+  const keys = (db: string) => page.evaluate((db) => new Promise<{ key: string; schema: unknown }[]>((resolve, reject) => {
+    const rq = indexedDB.open(db);
+    rq.onerror = () => reject(rq.error);
+    rq.onsuccess = () => {
+      const all = rq.result.transaction('uploads').objectStore('uploads').getAll();
+      const ks = rq.result.transaction('uploads').objectStore('uploads').getAllKeys();
+      all.onsuccess = () => ks.onsuccess = () => {
+        resolve((ks.result as string[]).map((key, i) => ({ key, schema: (all.result[i] as { schema: unknown }).schema })));
+        rq.result.close();
+      };
+    };
+  }), db);
+  expect(await keys('gridfinity-tool-studio')).toEqual([{ key: 'up-legacy1', schema: 1 }]);
+  expect(await keys('gridfinity-tool-studio-kits')).toEqual([{ key: 'up-legacy1', schema: 2 }]);
+  // removing it removes it from both, so it isn't carried over again
+  await page.locator('#rmBtn').click();
+  await expect(page.locator('#tool optgroup[label="Your uploads"] option')).toHaveCount(0);
+  await expect.poll(() => keys('gridfinity-tool-studio')).toEqual([]);
+  await page.reload();
+  await open(page);
+  await expect(page.locator('#tool optgroup[label="Your uploads"] option')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
