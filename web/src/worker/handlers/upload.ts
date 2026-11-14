@@ -10,6 +10,7 @@ import { getCv, type CV } from '../../vision/opencv';
 import { outlineFromMask, type Mask } from '../../vision/outline';
 import { segment } from '../../vision/segment';
 import { detectSheet, rectRegion, renderSheetView, SHEET, SheetError, type Box, type Homography, type Point, type RGBAImage } from '../../vision/sheet';
+import { straighten } from '../../vision/straighten';
 import { symmetrize } from '../../vision/symmetry';
 import type { Deps } from '../deps';
 import { isOutOfMemory, memoryError, PipelineError, type UploadResult } from '../protocol';
@@ -297,16 +298,18 @@ export async function upload(image: RGBAImage, name: string, { manifold }: Deps,
       const data = new Uint8Array(filled.data as Uint8Array);
       filled.delete();
       const up = await outlineFromMask({ width: t.mask.width, height: t.mask.height, data }, [t.region[0], t.region[1]] as Vec2, PX);
-      const sym = symmetrize(manifold, up.outline);
+      // edges the mask wobbles along but that are straight (a box's sides) become straight lines
+      const outline = straighten(up.outline);
+      const sym = symmetrize(manifold, outline);
       parts.push({
         id: `p${i + 1}`,
-        outline: up.outline,
+        outline,
         crop: up.crop,
         up2sheet: up.up2sheet,
         symmetry: { outline: sym.outline, score: sym.score, axisDeg: sym.axisDeg, offset: sym.offset, centre: sym.centre },
       });
       const [[a, b, c], [d, e, g]] = up.up2sheet;
-      onSheet.push(up.outline.map(([qx, qy]): Point => [a * qx + b * qy + c, d * qx + e * qy + g]));
+      onSheet.push(outline.map(([qx, qy]): Point => [a * qx + b * qy + c, d * qx + e * qy + g]));
     }
   } finally {
     for (const t of traced) t.contour.delete();
