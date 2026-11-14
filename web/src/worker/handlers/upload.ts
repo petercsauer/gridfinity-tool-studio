@@ -8,6 +8,7 @@ import { MAX_SIDE } from '../../vision/decode';
 import { getSession, type Progress } from '../../vision/model';
 import { getCv, type CV } from '../../vision/opencv';
 import { outlineFromMask, type Mask } from '../../vision/outline';
+import { paperBlobs } from '../../vision/proposals';
 import { segment } from '../../vision/segment';
 import { detectSheet, rectRegion, renderSheetView, SHEET, SheetError, type Box, type Homography, type Point, type RGBAImage } from '../../vision/sheet';
 import { straighten } from '../../vision/straighten';
@@ -215,11 +216,21 @@ export async function upload(image: RGBAImage, name: string, { manifold }: Deps,
 
   // pass 1: the whole page plus 40 mm, to find the parts wherever they are
   const R1: Box = [-40, -40, pw + 40, ph + 40];
-  const first = findParts(cv, await env.segment((await rectRegion(image, H, R1, PX)).canvas), [R1[0], R1[1]]);
-  for (const f of first) f.contour.delete();
-  if (!first.length) throw new PipelineError('no-tool', NO_TOOL);
-  /** Pass-1 parts' boxes in sheet mm. */
+  const page = (await rectRegion(image, H, R1, PX)).canvas;
+  const first = findParts(cv, await env.segment(page), [R1[0], R1[1]]);
+  /** Pass-1 parts' boxes in sheet mm, and the dark or coloured blobs on the paper the model didn't find (a blob
+   * whose deepest point is on a part the model found is that part; its box alone could hold a small part beside
+   * it). */
   const seen = first.map(({ box: [x, y, w, h] }): Box => [R1[0] + x / PX, R1[1] + y / PX, R1[0] + (x + w) / PX, R1[1] + (y + h) / PX]);
+  try {
+    for (const { box, inner } of await paperBlobs(page, [R1[0], R1[1]], PX)) {
+      const at = new cv.Point((inner[0] - R1[0]) * PX, (inner[1] - R1[1]) * PX);
+      if (!first.some((f) => cv.pointPolygonTest(f.contour, at, true) >= -2 * PX)) seen.push(box);
+    }
+  } finally {
+    for (const f of first) f.contour.delete();
+  }
+  if (!seen.length) throw new PipelineError('no-tool', NO_TOOL);
 
   // pass 2: all the parts plus 15 mm, for precise edges
   const R2: Box = [
