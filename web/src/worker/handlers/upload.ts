@@ -194,8 +194,16 @@ async function traceRegion(cv: CV, image: RGBAImage, H: Homography, region: Box,
 /** A traced part's bounding box in sheet mm. */
 const boxMm = ({ region: [rx, ry], box: [x, y, w, h] }: Traced): Box => [rx + x / PX, ry + y / PX, rx + (x + w) / PX, ry + (y + h) / PX];
 
-/** Whether two sheet-mm boxes overlap. */
-const overlaps = (a: Box, b: Box) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+/** Whether the sheet-mm point `p` is on (or within 1 mm of) traced part `t`'s outline: its contour, not its box,
+ * which can hold a small part beside a diagonal one. */
+function onPart(cv: CV, t: Traced, p: Vec2): boolean {
+  const at = new cv.Point((p[0] - t.region[0]) * PX, (p[1] - t.region[1]) * PX);
+  return cv.pointPolygonTest(t.contour, at, true) >= -PX;
+}
+
+/** Area (mm²) of a sheet-mm box, and of two boxes' overlap. */
+const boxArea = ([x0, y0, x1, y1]: Box) => Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+const overlapArea = (a: Box, b: Box) => boxArea([Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])]);
 
 /** Whether `p` lies in `box` grown by `pad` mm. */
 const inBox = ([x, y]: Vec2, [x0, y0, x1, y1]: Box, pad: number) => x >= x0 - pad && x <= x1 + pad && y >= y0 - pad && y <= y1 + pad;
@@ -229,27 +237,44 @@ export async function upload(image: RGBAImage, name: string, { manifold }: Deps,
   const parts: Part[] = [];
   const onSheet: Point[][] = [];
   try {
-    traced.push(...await traceRegion(cv, image, H, R2, env));
+    // only blobs centred in a pass-1 part (grown 3 mm) are parts: the tighter crop can cut clutter beside the
+    // paper down to a sliver whose centre is on it
+    for (const t of await traceRegion(cv, image, H, R2, env)) {
+      if (seen.some((b) => inBox(t.centreMm, b, 3))) traced.push(t);
+      else t.contour.delete();
+    }
     // the model can drop a small part from a crop holding a larger one (an antenna beside its analyser): each
     // pass-1 part no pass-2 part lies in is segmented again in its own crop
     for (const b of seen) {
-      // already traced: a pass-2 part lies in it, or it is a piece of one (its centre is in a part's box)
+      // already traced: a pass-2 part lies in it, or it is a piece of one (its middle is on a traced part)
       const mid: Vec2 = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
-      if (traced.some((t) => inBox(t.centreMm, b, 2) || inBox(mid, boxMm(t), 0))) continue;
+      if (traced.some((t) => inBox(t.centreMm, b, 2) || onPart(cv, t, mid))) continue;
       // pass 1 may have seen only some of the part, so the crop grows around what is found until the part
       // stays clear of its edges
-      let region: Box = [b[0] - 15, b[1] - 15, b[2] + 15, b[3] + 15];
+      // (up to the whole page plus its margin, R1)
+      const clip = (r: Box): Box => [Math.max(R1[0], r[0]), Math.max(R1[1], r[1]), Math.min(R1[2], r[2]), Math.min(R1[3], r[3])];
+      let region = clip([b[0] - 15, b[1] - 15, b[2] + 15, b[3] + 15]);
       let keep: Traced | null = null;
-      for (let tries = 0; tries < 3; tries++) {
+      /** What this part is known to cover: its pass-1 box, then the blob kept from the last crop. */
+      let ref: Box = b;
+      for (let tries = 0; tries < 12; tries++) {
         keep?.contour.delete();
         const own = await traceRegion(cv, image, H, region, env);
-        const mine = own.filter((t) => inBox(t.centreMm, b, 2) || overlaps(boxMm(t), b));
-        keep = mine.length ? mine.reduce((p, q) => (q.area > p.area ? q : p)) : null;
+        // this part: the blob overlapping most of `ref` (or of itself, the smaller), never one that is (a piece of)
+        // a part already traced, such as a slice of a large neighbour the crop clipped
+        const known = (t: Traced) => traced.some((u) => onPart(cv, u, t.centreMm));
+        const share = (t: Traced) => overlapArea(boxMm(t), ref) / Math.max(1e-9, Math.min(boxArea(boxMm(t)), boxArea(ref)));
+        const mine = own.filter((t) => !known(t) && (inBox(t.centreMm, ref, 2) || share(t) >= 0.5));
+        keep = mine.length ? mine.reduce((p, q) => (overlapArea(boxMm(q), ref) > overlapArea(boxMm(p), ref) ? q : p)) : null;
         for (const t of own) if (t !== keep) t.contour.delete();
         if (!keep) break;
         const k = boxMm(keep);
-        if (k[0] - region[0] > 3 && k[1] - region[1] > 3 && region[2] - k[2] > 3 && region[3] - k[3] > 3) break;
-        region = [k[0] - 15, k[1] - 15, k[2] + 15, k[3] + 15];
+        ref = k;
+        const clear = (edge: number, at: number, limit: number) => Math.abs(edge - at) > 3 || Math.abs(at - limit) < 1e-6;
+        if (clear(k[0], region[0], R1[0]) && clear(k[1], region[1], R1[1]) && clear(k[2], region[2], R1[2]) && clear(k[3], region[3], R1[3])) break;
+        const next = clip([k[0] - 15, k[1] - 15, k[2] + 15, k[3] + 15]);
+        if (next.every((v, j) => Math.abs(v - region[j]!) < 1e-6)) break;
+        region = next;
       }
       if (keep) traced.push(keep);
     }

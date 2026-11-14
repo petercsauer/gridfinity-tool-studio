@@ -96,13 +96,25 @@ function layoutFor(p: Params): Layout | undefined {
 }
 /** Uploads remember their layout; saved 500 ms after the last change to it. */
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingSaves = new Map<string, Layout>();
 function queueSave(id: string, layout: Layout): void {
   clearTimeout(saveTimers.get(id));
-  saveTimers.set(id, setTimeout(() => {
-    saveTimers.delete(id);
-    void saveLayout(id, layout).catch(() => {});
-  }, 500));
+  pendingSaves.set(id, layout);
+  saveTimers.set(id, setTimeout(() => flushSave(id), 500));
 }
+function flushSave(id: string): void {
+  clearTimeout(saveTimers.get(id));
+  saveTimers.delete(id);
+  const l = pendingSaves.get(id);
+  pendingSaves.delete(id);
+  if (l) void saveLayout(id, l).catch(() => {});
+}
+// the last half second of changes isn't lost when the page is hidden or closed
+const flushSaves = () => [...pendingSaves.keys()].forEach(flushSave);
+addEventListener('pagehide', flushSaves);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushSaves();
+});
 /** A one-part kit's angle shows on the Rotation slider, which can only show 0–90°. */
 function syncRot(): void {
   const pl = layouts.get(toolMenu.value)?.placements;
@@ -113,8 +125,7 @@ function syncRot(): void {
   syncP(el);
 }
 const layoutView = new LayoutView($<HTMLCanvasElement>('plan'), $('partList'), $('layoutStatus'), {
-  change(layout) {
-    const id = toolMenu.value;
+  change(layout, id) {
     layouts.set(id, layout);
     syncRot();
     if (isUpload(id)) queueSave(id, layout);

@@ -464,7 +464,7 @@ test('layout persists: a moved upload keeps its placement after a reload', async
   await expect.poll(async () => (await sentPlacement(page))?.rot).toBe(90);
   const moved = (await sentPlacement(page))!;
   const stored = () => page.evaluate(() => new Promise<{ x: number; rot: number } | null>((resolve) => {
-    const rq = indexedDB.open('gridfinity-tool-studio');
+    const rq = indexedDB.open('gridfinity-tool-studio-kits');
     rq.onsuccess = () => {
       const all = rq.result.transaction('uploads').objectStore('uploads').getAll();
       all.onsuccess = () => {
@@ -484,4 +484,59 @@ test('layout persists: a moved upload keeps its placement after a reload', async
   expect(back.y).toBeCloseTo(moved.y, 6);
   await expect(page.locator('#rotV')).toHaveText('90°');
   await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+});
+
+test('an upload saved by the single-tool version is carried over, and left for that version', async ({ page }) => {
+  const errors = pageErrors(page);
+  await open(page);
+  // a schema-1 record in the old database, as the single-tool version saved it
+  const p = JSON.parse(readFileSync(here('../../tests/fixtures/web-presets/stripper.json'), 'utf-8'));
+  await page.evaluate(async (p) => {
+    const sheetViewJpeg = await (await fetch('presets/studfinder-sheet.jpg')).blob();
+    const record = {
+      id: 'up-legacy1', label: 'Old stripper', sym: false, outline: p.outline_mm, crop: p.crop_mm, up2sheet: p.up2sheet,
+      symmetry: { outline: p.symmetric_outline_mm, score: p.symmetry_score, axisDeg: 0, offset: 0 },
+      sheetViewJpeg, sheetBox: p.sheet_box_mm, schema: 1, created: 1, used: 1,
+    };
+    await new Promise<void>((resolve, reject) => {
+      const rq = indexedDB.open('gridfinity-tool-studio');
+      rq.onupgradeneeded = () => rq.result.createObjectStore('uploads');
+      rq.onerror = () => reject(rq.error);
+      rq.onsuccess = () => {
+        const tx = rq.result.transaction('uploads', 'readwrite');
+        tx.objectStore('uploads').put(record, record.id);
+        tx.oncomplete = () => { rq.result.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+  }, p);
+  await page.reload();
+  await open(page);
+  // it is in the menu, and builds
+  await expect(page.locator('#tool optgroup[label="Your uploads"] option')).toHaveText(['Old stripper']);
+  await page.locator('#tool').selectOption('up-legacy1');
+  await expect(page.locator('#exp')).toBeEnabled({ timeout: 60_000 });
+  // the old database still has it as it was, so an old tab still open keeps working (and deletes nothing)
+  const keys = (db: string) => page.evaluate((db) => new Promise<{ key: string; schema: unknown }[]>((resolve, reject) => {
+    const rq = indexedDB.open(db);
+    rq.onerror = () => reject(rq.error);
+    rq.onsuccess = () => {
+      const all = rq.result.transaction('uploads').objectStore('uploads').getAll();
+      const ks = rq.result.transaction('uploads').objectStore('uploads').getAllKeys();
+      all.onsuccess = () => ks.onsuccess = () => {
+        resolve((ks.result as string[]).map((key, i) => ({ key, schema: (all.result[i] as { schema: unknown }).schema })));
+        rq.result.close();
+      };
+    };
+  }), db);
+  expect(await keys('gridfinity-tool-studio')).toEqual([{ key: 'up-legacy1', schema: 1 }]);
+  expect(await keys('gridfinity-tool-studio-kits')).toEqual([{ key: 'up-legacy1', schema: 2 }]);
+  // removing it removes it from both, so it isn't carried over again
+  await page.locator('#rmBtn').click();
+  await expect(page.locator('#tool optgroup[label="Your uploads"] option')).toHaveCount(0);
+  await expect.poll(() => keys('gridfinity-tool-studio')).toEqual([]);
+  await page.reload();
+  await open(page);
+  await expect(page.locator('#tool optgroup[label="Your uploads"] option')).toHaveCount(0);
+  expect(errors).toEqual([]);
 });
