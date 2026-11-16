@@ -11,7 +11,7 @@ import { flatten, flattenCubic, insertAnchor, nearest, nearestOnCubic, segment, 
 import { bendSegment, deleteAnchor, isValid, moveAnchor, moveHandle, refit, roundCorner, toggleKind } from './path/edit';
 import { FIT } from './path/fit';
 import {
-  fitHalf, fullFromHalf, halfFromFull, mirrorBend, mirrorDelete, mirrorInsert, mirrorMoveAnchor, mirrorMoveHandle,
+  fitHalf, fullFromHalf, halfFromFull, mapAnchor, mirrorBend, mirrorDelete, mirrorInsert, mirrorMoveAnchor, mirrorMoveHandle,
   mirrorRound, mirrorStraighten, mirrorToggle, type Axis,
 } from './path/mirror';
 import type { PartTrace } from './worker/protocol';
@@ -68,6 +68,8 @@ export class OutlineView {
   /** Symmetric editing: the part's axis, the outline's half (this.path is it with its mirror) and the half's ring
    * with the axis (what deleting a point refits to). Null when the outline is edited as a whole. */
   private axis: Axis | null = null;
+  /** The part the "edited as a whole" message was last given for. */
+  private warnedFor = '';
   private half: BezierPath | null = null;
   private halfTrace: Ring | null = null;
 
@@ -140,22 +142,28 @@ export class OutlineView {
         this.path = fullFromHalf(this.axis, half);
         return;
       }
-      this.say('This outline crosses its mirror axis more than twice, so it is edited as a whole.');
+      // said once per part, not on every refresh
+      if (this.warnedFor !== key) {
+        this.warnedFor = key;
+        this.say(pl.path ? 'This outline can no longer be split at its mirror axis, so it is edited as a whole.'
+          : 'This outline crosses its mirror axis more than twice, so it is edited as a whole.');
+      }
     }
-    this.path = pl.path ?? this.fitted(key);
+    // an outline edited as a mirrored pair is set aside while Symmetric is off: the trace is edited (and used)
+    this.path = (pl.path && !(pl.pathSym && !pl.sym) ? pl.path : null) ?? this.fitted(key);
   }
 
   /** The traced symmetric outline's half fitted at the slider's tolerance (cached like `fitted`). */
   private fittedHalfFor = '';
   private fittedHalfValue: { half: BezierPath; ring: Ring } | null = null;
+  private fittedHalfTrace: Ring | null = null;
   private fittedHalf(key: string): { half: BezierPath; ring: Ring } | null {
     const traced = this.kit!.part.traced;
     const k = `${key}@${this.tolerance}`;
-    if (k !== this.fittedHalfFor || traced !== this.fittedTrace) {
+    if (k !== this.fittedHalfFor || traced !== this.fittedHalfTrace) {
       this.fittedHalfValue = fitHalf(this.kit!.part.mirror, traced, this.tolerance);
       this.fittedHalfFor = k;
-      this.fittedTrace = traced;
-      this.fittedFor = '';
+      this.fittedHalfTrace = traced;
     }
     return this.fittedHalfValue;
   }
@@ -171,7 +179,6 @@ export class OutlineView {
       this.fittedPath = refit(traced, this.tolerance);
       this.fittedFor = k;
       this.fittedTrace = traced;
-      this.fittedHalfFor = '';
     }
     return this.fittedPath;
   }
@@ -190,7 +197,7 @@ export class OutlineView {
     }
     if (this.axis && half) this.half = half;
     this.path = next;
-    this.hooks.change(next, said, !!this.axis);
+    this.hooks.change(next, said, !!(this.axis && this.half));
     this.say(said);
     this.sync();
     this.draw();
@@ -203,10 +210,14 @@ export class OutlineView {
     this.ui.detailValue.textContent = `${this.tolerance.toFixed(2)} mm`;
     this.selected = null;
     const fit = this.axis ? fitHalf(this.axis, this.kit.part.traced, this.tolerance) : null;
+    const whole = commit && !!this.axis && !fit;
+    // the half can't be fitted at this tolerance: the outline is refitted and edited as a whole from now on
+    if (whole) this.axis = this.half = this.halfTrace = null;
     const next = fit ? fullFromHalf(this.axis!, fit.half) : refit(this.kit.part.traced, this.tolerance);
     if (commit) {
       if (fit) this.halfTrace = fit.ring;
-      this.commit(next, `Refitted within ${this.tolerance.toFixed(2)} mm of the trace: ${next.anchors.length} points.`, fit?.half);
+      this.commit(next, `Refitted within ${this.tolerance.toFixed(2)} mm of the trace: ${next.anchors.length} points.`
+        + (whole ? ' At this detail it can\'t be split at its mirror axis, so it is edited as a whole.' : ''), fit?.half);
     } else {
       this.path = next;
       if (fit) this.half = fit.half;
@@ -304,7 +315,9 @@ export class OutlineView {
     if (this.axis && this.half && this.halfTrace) {
       const half = mirrorDelete(this.axis, this.half, i, this.halfTrace);
       if (!half) {
-        this.say('The points on the mirror axis stay; drag one along the axis to move it.');
+        const { j } = mapAnchor(this.half.anchors.length, i);
+        this.say(j === 0 || j === this.half.anchors.length - 1 ? 'The points on the mirror axis stay; drag one along the axis to move it.'
+          : 'Each half needs at least one point between the two on the mirror axis.');
         return;
       }
       this.selected = null;

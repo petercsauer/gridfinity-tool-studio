@@ -120,3 +120,27 @@ describe('mirrored outlines', () => {
     expect(fitHalf({ deg: 0, offset: 0, centre: [0, 0] }, [...pinched, pinched[0]!], 0.3)).toBeNull();
   });
 });
+
+describe('snapping on the mirrored side', () => {
+  // a box half to the right of an axis tilted 20 degrees: B and T on it, two corners off it
+  const corner = (p: Vec2) => ({ p, hin: [0, 0] as Vec2, hout: [0, 0] as Vec2, kind: 'corner' as const });
+  const make = (deg: number): { a: Axis; half: BezierPath } => {
+    const a: Axis = { deg, offset: 0, centre: [0, 0] };
+    const r = (deg * Math.PI) / 180;
+    const at = (x: number, y: number): Vec2 => [x * Math.cos(r) - y * Math.sin(r), x * Math.sin(r) + y * Math.cos(r)];
+    return { a, half: { anchors: [corner(at(0, -10)), corner(at(10, -10)), corner(at(10, 10)), corner(at(0, 10))] } };
+  };
+  it('is left off for a tilted axis (it would tilt the side being dragged) and kept for a level one', () => {
+    for (const [deg, snaps] of [[20, false], [0, true]] as const) {
+      const { a, half } = make(deg);
+      const n = 2 * half.anchors.length - 2;
+      // drag point 2's mirror (n - 2) to where its twin (point 2) would be just off vertical from point 1
+      const q = half.anchors[1]!.p;
+      const to = mirrorPoint(a, [q[0] + 0.3, q[1] + 20]);
+      const snapped = mirrorMoveAnchor(a, half, n - 2, to, true);
+      const free = mirrorMoveAnchor(a, half, n - 2, to, false);
+      const same = snapped.anchors.every((x, k) => dist(x.p, free.anchors[k]!.p) < 1e-9);
+      expect(same).toBe(!snaps);
+    }
+  });
+});

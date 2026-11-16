@@ -184,7 +184,10 @@ export function mirrorMoveAnchor(a: Axis, half: BezierPath, i: number, to: Vec2,
     anchors[j] = { ...anchors[j]!, p: ontoAxis(a, target) };
     return constrainEnds(a, { anchors });
   }
-  return constrainEnds(a, moveAnchor(half, j, target, snap));
+  // snapping squares the half's straight sides; the mirror keeps them square only if the axis is at a multiple of
+  // 45 degrees, so on the mirrored side of a tilted axis it would tilt the side being dragged
+  const keepsSquare = Math.abs(a.deg / 45 - Math.round(a.deg / 45)) < 1e-9;
+  return constrainEnds(a, moveAnchor(half, j, target, snap && (!mirrored || keepsSquare)));
 }
 
 /** A handle of anchor i of the whole outline dragged to `to` (Alt: `breakPair`). */
