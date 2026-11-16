@@ -2,12 +2,18 @@
 // the outline (squares are corners, circles smooth); the selected point shows its handles. Drag a point, a
 // handle or the outline itself; double-click a point to switch it between corner and smooth, or the outline to
 // add a point. The traced outline stays drawn faintly and is what the Detail slider and deleting a point refit
-// to. An edit that would make the outline cross itself is drawn red and undone when let go.
+// to. An edit that would make the outline cross itself is drawn red and undone when let go. With Symmetric on,
+// the outline is a mirrored pair about the part's axis (path/mirror.ts): either side can be edited and the other
+// follows; the two points on the axis slide along it.
 import type { Ring, Vec2 } from './geometry/pocket';
 import type { Placement } from './kit';
 import { flatten, flattenCubic, insertAnchor, nearest, nearestOnCubic, segment, straightenSegment, type BezierPath } from './path/bezier';
 import { bendSegment, deleteAnchor, isValid, moveAnchor, moveHandle, refit, roundCorner, toggleKind } from './path/edit';
 import { FIT } from './path/fit';
+import {
+  fitHalf, fullFromHalf, halfFromFull, mapAnchor, mirrorBend, mirrorDelete, mirrorInsert, mirrorMoveAnchor, mirrorMoveHandle,
+  mirrorRound, mirrorStraighten, mirrorToggle, type Axis,
+} from './path/mirror';
 import type { PartTrace } from './worker/protocol';
 
 /** Pick distances on screen (css px). */
@@ -26,8 +32,9 @@ export interface OutlineKit {
 }
 
 export interface OutlineHooks {
-  /** A committed edit: the part's new outline, or undefined to go back to the traced one. */
-  change(path: BezierPath | undefined, said: string): void;
+  /** A committed edit: the part's new outline (and whether it is a mirrored pair), or undefined to go back to
+   * the traced one. */
+  change(path: BezierPath | undefined, said: string, mirrored?: boolean): void;
   undo(redo: boolean): void;
 }
 
@@ -37,6 +44,7 @@ interface Drag {
   pointer: number;
   pick: Pick;
   start: BezierPath;
+  startHalf: BezierPath | null;
   from: Vec2;
   moved: boolean;
 }
@@ -57,6 +65,13 @@ export class OutlineView {
   private xf: Xf = { s: 1, ox: 0, oy: 0, dpr: 1 };
   private image = new Image();
   private imageUrl = '';
+  /** Symmetric editing: the part's axis, the outline's half (this.path is it with its mirror) and the half's ring
+   * with the axis (what deleting a point refits to). Null when the outline is edited as a whole. */
+  private axis: Axis | null = null;
+  /** The part the "edited as a whole" message was last given for. */
+  private warnedFor = '';
+  private half: BezierPath | null = null;
+  private halfTrace: Ring | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly ui: {
     detail: HTMLInputElement; detailValue: HTMLElement; count: HTMLElement; status: HTMLElement;
@@ -100,12 +115,57 @@ export class OutlineView {
       img.src = kit.sheetImage;
       this.image = img;
     }
-    if (!this.drag) this.path = kit ? (kit.placement.path ?? this.fitted(key)) : null;
+    if (!this.drag) this.load(kit, key);
     // an undo or redo can leave fewer points than the selection's index
     const n = this.path?.anchors.length ?? 0;
     if (this.selected && this.selected.i >= n) this.selected = null;
     this.sync();
     this.draw();
+  }
+
+  /** The path to edit: a symmetric part's mirrored pair (its edited one, or one fitted to its half), else the edited
+   * outline or one fitted to the whole trace. */
+  private load(kit: OutlineKit | null, key: string): void {
+    this.axis = this.half = this.halfTrace = null;
+    if (!kit) {
+      this.path = null;
+      return;
+    }
+    const pl = kit.placement;
+    if (pl.sym && (!pl.path || pl.pathSym)) {
+      const fit = this.fittedHalf(key);
+      const half = pl.path ? halfFromFull(pl.path) : fit?.half ?? null;
+      if (fit && half) {
+        this.axis = kit.part.mirror;
+        this.half = half;
+        this.halfTrace = fit.ring;
+        this.path = fullFromHalf(this.axis, half);
+        return;
+      }
+      // said once per part, not on every refresh
+      if (this.warnedFor !== key) {
+        this.warnedFor = key;
+        this.say(pl.path ? 'This outline can no longer be split at its mirror axis, so it is edited as a whole.'
+          : 'This outline crosses its mirror axis more than twice, so it is edited as a whole.');
+      }
+    }
+    // an outline edited as a mirrored pair is set aside while Symmetric is off: the trace is edited (and used)
+    this.path = (pl.path && !(pl.pathSym && !pl.sym) ? pl.path : null) ?? this.fitted(key);
+  }
+
+  /** The traced symmetric outline's half fitted at the slider's tolerance (cached like `fitted`). */
+  private fittedHalfFor = '';
+  private fittedHalfValue: { half: BezierPath; ring: Ring } | null = null;
+  private fittedHalfTrace: Ring | null = null;
+  private fittedHalf(key: string): { half: BezierPath; ring: Ring } | null {
+    const traced = this.kit!.part.traced;
+    const k = `${key}@${this.tolerance}`;
+    if (k !== this.fittedHalfFor || traced !== this.fittedHalfTrace) {
+      this.fittedHalfValue = fitHalf(this.kit!.part.mirror, traced, this.tolerance);
+      this.fittedHalfFor = k;
+      this.fittedHalfTrace = traced;
+    }
+    return this.fittedHalfValue;
   }
 
   /** The outline fitted to the trace at the slider's tolerance (cached per part, trace and tolerance: the trace
@@ -127,15 +187,17 @@ export class OutlineView {
     this.ui.status.textContent = text;
   }
 
-  /** Commit `next` as the part's outline. */
-  private commit(next: BezierPath, said: string): void {
-    if (!isValid(next)) {
-      this.say('That would make the outline cross itself, so it was left as it was.');
+  /** Commit `next` as the part's outline; in symmetric editing, a new half (the outline is it and its mirror). */
+  private commit(next: BezierPath | null, said: string, half?: BezierPath): void {
+    if (this.axis && half) next = fullFromHalf(this.axis, half);
+    if (!next || !isValid(next)) {
+      this.say(next ? 'That would make the outline cross itself, so it was left as it was.' : said);
       this.draw();
       return;
     }
+    if (this.axis && half) this.half = half;
     this.path = next;
-    this.hooks.change(next, said);
+    this.hooks.change(next, said, !!(this.axis && this.half));
     this.say(said);
     this.sync();
     this.draw();
@@ -146,11 +208,19 @@ export class OutlineView {
     if (!this.kit) return;
     this.tolerance = +this.ui.detail.value;
     this.ui.detailValue.textContent = `${this.tolerance.toFixed(2)} mm`;
-    const next = refit(this.kit.part.traced, this.tolerance);
     this.selected = null;
-    if (commit) this.commit(next, `Refitted within ${this.tolerance.toFixed(2)} mm of the trace: ${next.anchors.length} points.`);
-    else {
+    const fit = this.axis ? fitHalf(this.axis, this.kit.part.traced, this.tolerance) : null;
+    const whole = commit && !!this.axis && !fit;
+    // the half can't be fitted at this tolerance: the outline is refitted and edited as a whole from now on
+    if (whole) this.axis = this.half = this.halfTrace = null;
+    const next = fit ? fullFromHalf(this.axis!, fit.half) : refit(this.kit.part.traced, this.tolerance);
+    if (commit) {
+      if (fit) this.halfTrace = fit.ring;
+      this.commit(next, `Refitted within ${this.tolerance.toFixed(2)} mm of the trace: ${next.anchors.length} points.`
+        + (whole ? ' At this detail it can\'t be split at its mirror axis, so it is edited as a whole.' : ''), fit?.half);
+    } else {
       this.path = next;
+      if (fit) this.half = fit.half;
       this.sync();
       this.draw();
     }
@@ -178,6 +248,11 @@ export class OutlineView {
   private toggleSelected(): void {
     const i = this.pointIndex();
     if (i === null || !this.path) return;
+    if (this.axis && this.half) {
+      const half = mirrorToggle(this.axis, this.half, i);
+      this.commit(null, `Point ${i + 1} is now ${fullFromHalf(this.axis, half).anchors[i]!.kind}.`, half);
+      return;
+    }
     const next = toggleKind(this.path, i);
     this.commit(next, `Point ${i + 1} is now ${next.anchors[i]!.kind}.`);
   }
@@ -186,21 +261,23 @@ export class OutlineView {
   private straightenSelected(): void {
     if (!this.selected || !this.path) return;
     const i = this.selected.i;
-    this.commit(straightenSegment(this.path, i), `Segment ${i + 1} is straight.`);
+    if (this.axis && this.half) this.commit(null, `Segment ${i + 1} is straight.`, mirrorStraighten(this.axis, this.half, i));
+    else this.commit(straightenSegment(this.path, i), `Segment ${i + 1} is straight.`);
   }
 
   private roundSelected(): void {
     const i = this.pointIndex();
     if (i === null || !this.path || this.path.anchors[i]!.kind !== 'corner') return;
     const r = Math.min(20, Math.max(0.5, +this.ui.radius.value || 2));
-    const { path: next, radius } = roundCorner(this.path, i, r);
+    const m = this.axis && this.half ? mirrorRound(this.axis, this.half, i, r) : null;
+    const { path: next, radius } = m ? { path: null, radius: m.radius } : roundCorner(this.path, i, r);
     if (!radius) {
-      this.say(`Point ${i + 1} barely turns, so there is no corner to round.`);
+      this.say(m ? `Point ${i + 1} is on the mirror axis or barely turns, so it isn't rounded.` : `Point ${i + 1} barely turns, so there is no corner to round.`);
       return;
     }
     this.selected = null;
     const used = +radius.toFixed(2);
-    this.commit(next, used < r - 0.005 ? `Point ${i + 1} rounded to ${used} mm, as much as its sides allow.` : `Point ${i + 1} rounded to ${r} mm.`);
+    this.commit(next, used < r - 0.005 ? `Point ${i + 1} rounded to ${used} mm, as much as its sides allow.` : `Point ${i + 1} rounded to ${r} mm.`, m?.half);
   }
 
   /** A point added on the selected segment where it was picked, or halfway along the one after the selected
@@ -211,7 +288,19 @@ export class OutlineView {
       this.say('Pick a point or a stretch of the outline first, or double-click the outline where a point should go.');
       return;
     }
-    const { path, index } = insertAnchor(this.path, sel.i, sel.kind === 'line' ? sel.t : 0.5);
+    this.insertAt(sel.i, sel.kind === 'line' ? sel.t : 0.5);
+  }
+
+  /** A point added on segment i at t (and its mirror, in symmetric editing), then selected. */
+  private insertAt(i: number, t: number): void {
+    if (!this.path) return;
+    if (this.axis && this.half) {
+      const { half, index } = mirrorInsert(this.axis, this.half, i, t);
+      this.selected = { kind: 'point', i: index };
+      this.commit(null, `Point added, and its mirror: ${2 * half.anchors.length - 2} points.`, half);
+      return;
+    }
+    const { path, index } = insertAnchor(this.path, i, t);
     this.selected = { kind: 'point', i: index };
     this.commit(path, `Point added: ${path.anchors.length} points.`);
   }
@@ -221,6 +310,18 @@ export class OutlineView {
     if (i === null || !this.path || !this.kit) return;
     if (this.path.anchors.length <= 3) {
       this.say('An outline needs at least three points.');
+      return;
+    }
+    if (this.axis && this.half && this.halfTrace) {
+      const half = mirrorDelete(this.axis, this.half, i, this.halfTrace);
+      if (!half) {
+        const { j } = mapAnchor(this.half.anchors.length, i);
+        this.say(j === 0 || j === this.half.anchors.length - 1 ? 'The points on the mirror axis stay; drag one along the axis to move it.'
+          : 'Each half needs at least one point between the two on the mirror axis.');
+        return;
+      }
+      this.selected = null;
+      this.commit(null, `Point ${i + 1} and its mirror removed; the outline was refitted to the trace there.`, half);
       return;
     }
     this.selected = null;
@@ -255,7 +356,9 @@ export class OutlineView {
       const d = e.shiftKey ? 1 : 0.1;
       const [dx, dy] = { ArrowLeft: [-d, 0], ArrowRight: [d, 0], ArrowUp: [0, -d], ArrowDown: [0, d] }[e.key] ?? [0, 0];
       const a = p.anchors[i]!.p;
-      this.commit(moveAnchor(p, i, [a[0] + dx!, a[1] + dy!], false), `Point ${i + 1} moved.`);
+      const to: Vec2 = [a[0] + dx!, a[1] + dy!];
+      if (this.axis && this.half) this.commit(null, `Point ${i + 1} moved.`, mirrorMoveAnchor(this.axis, this.half, i, to, false));
+      else this.commit(moveAnchor(p, i, to, false), `Point ${i + 1} moved.`);
     } else if ((e.key === 'Delete' || e.key === 'Backspace' || e.key === 'd' || e.key === 'D') && i !== null) {
       this.removeSelected();
     } else if (e.key === 'a' || e.key === 'A') {
@@ -327,7 +430,7 @@ export class OutlineView {
       return;
     }
     if (hit.kind !== 'handle') this.selected = hit.kind === 'line' ? { ...hit } : hit;
-    this.drag = { pointer: e.pointerId, pick: hit, start: this.path, from: at, moved: false };
+    this.drag = { pointer: e.pointerId, pick: hit, start: this.path, startHalf: this.half, from: at, moved: false };
     this.canvas.setPointerCapture(e.pointerId);
     this.sync();
     this.draw();
@@ -341,9 +444,18 @@ export class OutlineView {
     d.moved = true;
     const pk = d.pick;
     const s = d.start;
-    this.path = pk.kind === 'point' ? moveAnchor(s, pk.i, [s.anchors[pk.i]!.p[0] + at[0] - d.from[0], s.anchors[pk.i]!.p[1] + at[1] - d.from[1]], !e.altKey)
-      : pk.kind === 'handle' ? moveHandle(s, pk.i, pk.side, at, e.altKey)
-        : bendSegment(s, pk.i, pk.t, at);
+    const to: Vec2 = pk.kind === 'point' ? [s.anchors[pk.i]!.p[0] + at[0] - d.from[0], s.anchors[pk.i]!.p[1] + at[1] - d.from[1]] : at;
+    if (this.axis && d.startHalf) {
+      const h = d.startHalf;
+      this.half = pk.kind === 'point' ? mirrorMoveAnchor(this.axis, h, pk.i, to, !e.altKey)
+        : pk.kind === 'handle' ? mirrorMoveHandle(this.axis, h, pk.i, pk.side, to, e.altKey)
+          : mirrorBend(this.axis, h, pk.i, pk.t, to);
+      this.path = fullFromHalf(this.axis, this.half);
+    } else {
+      this.path = pk.kind === 'point' ? moveAnchor(s, pk.i, to, !e.altKey)
+        : pk.kind === 'handle' ? moveHandle(s, pk.i, pk.side, to, e.altKey)
+          : bendSegment(s, pk.i, pk.t, to);
+    }
     this.invalid = !isValid(this.path);
     this.say(this.invalid ? 'The outline would cross itself; let go to put it back.' : '');
     this.draw();
@@ -355,6 +467,7 @@ export class OutlineView {
     this.drag = null;
     if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
     const next = this.path!;
+    const nextHalf = this.half;
     const bad = this.invalid;
     this.invalid = false;
     if (!d.moved) {
@@ -362,13 +475,15 @@ export class OutlineView {
       return;
     }
     this.path = d.start;
+    this.half = d.startHalf;
     if (bad) {
       this.say('The outline would have crossed itself, so it was put back.');
       this.draw();
       return;
     }
     const pk = d.pick;
-    this.commit(next, pk.kind === 'point' ? `Point ${pk.i + 1} moved.` : pk.kind === 'handle' ? `Point ${pk.i + 1}'s curve changed.` : `Segment ${pk.i + 1} bent.`);
+    this.commit(next, pk.kind === 'point' ? `Point ${pk.i + 1} moved.` : pk.kind === 'handle' ? `Point ${pk.i + 1}'s curve changed.` : `Segment ${pk.i + 1} bent.`,
+      this.axis ? nextHalf ?? undefined : undefined);
   }
 
   private cancel(e: PointerEvent): void {
@@ -377,6 +492,7 @@ export class OutlineView {
     this.drag = null;
     this.invalid = false;
     this.path = d.start;
+    this.half = d.startHalf;
     this.draw();
   }
 
@@ -388,10 +504,7 @@ export class OutlineView {
       this.toggleSelected();
     } else if (hit?.kind === 'line') {
       const c = segment(this.path, hit.i);
-      const t = nearestOnCubic(c, this.toPart(e)).t;
-      const { path, index } = insertAnchor(this.path, hit.i, t);
-      this.selected = { kind: 'point', i: index };
-      this.commit(path, `Point added: ${path.anchors.length} points.`);
+      this.insertAt(hit.i, nearestOnCubic(c, this.toPart(e)).t);
     }
   }
 
@@ -462,6 +575,19 @@ export class OutlineView {
     ctx.strokeStyle = 'rgba(29,29,31,.55)';
     ctx.stroke();
     ctx.setLineDash([]);
+    // the mirror axis, across the part, in symmetric editing
+    if (this.axis) {
+      const a = this.axis;
+      const dir: Vec2 = [-Math.sin((a.deg * Math.PI) / 180), Math.cos((a.deg * Math.PI) / 180)];
+      const o: Vec2 = [a.centre[0] + Math.cos((a.deg * Math.PI) / 180) * a.offset, a.centre[1] + Math.sin((a.deg * Math.PI) / 180) * a.offset];
+      const reach = Math.hypot(x1 - x0, y1 - y0);
+      line([[o[0] - dir[0] * reach, o[1] - dir[1] * reach], [o[0] + dir[0] * reach, o[1] + dir[1] * reach]], false);
+      ctx.setLineDash([7 * dpr, 4 * dpr]);
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.strokeStyle = cs.getPropertyValue('--trace-axis').trim() || '#34c759';
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // the path, with the selected segment heavier
     line(flatten(path, 0.05 / Math.max(1e-6, s / dpr / 4)).points);
     ctx.lineWidth = 4 * dpr;
@@ -516,5 +642,6 @@ export class OutlineView {
     // the points on screen (css px), for tests: written once the transform is known
     canvas.dataset.points = JSON.stringify(path.anchors.map((a) => this.toScreen(a.p).map((v) => +(v / dpr).toFixed(1))));
     canvas.dataset.origin = JSON.stringify([ox / dpr, oy / dpr]);
+    canvas.dataset.mirrored = String(!!this.axis);
   }
 }

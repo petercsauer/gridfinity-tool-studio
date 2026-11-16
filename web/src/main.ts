@@ -264,7 +264,7 @@ const outlineView = new OutlineView($<HTMLCanvasElement>('outlineCanvas'), {
   remove: $<HTMLButtonElement>('outlineRemove'), reset: $<HTMLButtonElement>('outlineReset'),
   round: $<HTMLButtonElement>('outlineRound'), radius: input('outlineRadius'),
 }, {
-  change(path) {
+  change(path, _said, mirrored) {
     const l = currentLayout();
     const id = outlinePart();
     if (!l || !id) return;
@@ -272,8 +272,8 @@ const outlineView = new OutlineView($<HTMLCanvasElement>('outlineCanvas'), {
       ...l,
       placements: l.placements.map((pl) => {
         if (pl.part !== id) return pl;
-        const { path: _old, ...rest } = pl;
-        return path ? { ...rest, path } : rest;
+        const { path: _old, pathSym: _sym, ...rest } = pl;
+        return path ? { ...rest, path, ...(mirrored ? { pathSym: true } : {}) } : rest;
       }),
     };
     layoutView.apply(next, l);
@@ -885,9 +885,11 @@ function syncInspector(): void {
     showRange('depth', inScope.map((pl) => pl.depth), trim);
   }
   // an edited outline replaces the traced one and its symmetric version
-  const edited = inScope.some((pl) => !!pl.path);
+  // an outline edited as a whole replaces the traced one and its symmetric version; one edited as a mirrored pair
+  // (with Symmetric on) is still symmetric, so Symmetric can be turned off and on again
+  const edited = inScope.some((pl) => !!pl.path && !pl.pathSym);
   input('sym').disabled = edited;
-  input('sym').title = edited ? 'This outline was edited in the Outline pane; reset it there to use the symmetric outline.' : '';
+  input('sym').title = edited ? 'This outline was edited in the Outline pane with Symmetric off; reset it there to use the symmetric outline.' : '';
   // rotation turns one part: the selected one, or a kit's only one
   const turnable = !!sel || vis.length === 1;
   input('rot').disabled = !turnable;

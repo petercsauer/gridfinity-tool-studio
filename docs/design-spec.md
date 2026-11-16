@@ -459,7 +459,7 @@ Small presentation-only listeners, kept separate from the app logic:
 - **Key legend** (`.outline-keys`, above the bar): one Footnote `--label-2` line, wrapping when narrow, listing the keys; each key a `<kbd>` chip (`--bg-field`, `--shadow-pill`, weight 600, `--label`). The canvas leaves room for it.
 - **Bar** (bottom): `.btn`s at 28 px, Subheadline: "Make corner"/"Make smooth", "Straighten", "Delete point", "Round corner" with a 52 px mm field, "Reset to trace". Then the status (`#outlineStatus`, `aria-live=polite`) on a `--bg-field` pill, sentence case with a full stop. No tinted controls.
 - **Keys:** Tab/Shift+Tab step through the points (then move on), arrows move one 0.1 mm (Shift 1 mm), D (or Delete) remove, A add a point after the selected one (or on the picked stretch), C corner/smooth, S straighten, R round, − and + less or more detail, Escape deselect, Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z undo and redo (shared with the Layout pane).
-- **Symmetric tool** is disabled for a part whose outline was edited (its title says why); Reset to trace enables it again.
+- **Symmetric editing:** with Symmetric tool on, the outline is a mirrored pair about the part's axis, drawn as a dashed 1.5 px `--trace-axis` line across the pane; editing either side moves both, and the points on the axis slide along it. Symmetric tool is disabled only for an outline edited with it off (its title says why); Reset to trace enables it again.
 ---
 
 ## 4. Do / Don't (web pitfalls that make it a fake Apple clone)

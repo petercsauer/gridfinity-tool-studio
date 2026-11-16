@@ -39,8 +39,9 @@ export function placeKit(m: ManifoldToplevel, preset: PresetData, p: Params, req
   const all = layout.placements.map((pl): PlacedPart => {
     const part = byId.get(pl.part)!;
     const traced = pl.sym ? part.symmetry.outline : part.outline;
-    // an edited outline that wouldn't make a sound pocket (the editor doesn't let one through) is ignored
-    const ring = pl.path ? toRing(pl.path) : null;
+    // an edited outline that wouldn't make a sound pocket (the editor doesn't let one through) is ignored, and so
+    // is one edited as a mirrored pair while Symmetric is off (it comes back when Symmetric is turned on again)
+    const ring = pl.path && !(pl.pathSym && !pl.sym) ? toRing(pl.path) : null;
     const edited = !!ring && checkRing(ring).ok;
     const { tool, pocket } = makePocket(m, edited ? ring! : traced, pl);
     return { part, placement: pl, traced, edited, tool, pocket, placedTool: placeRing(tool, pl), placedPocket: placeRing(pocket, pl) };
