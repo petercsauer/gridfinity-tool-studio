@@ -66,7 +66,9 @@ handles apart. Keys (with the outline focused): **D** delete, **A** add a point,
 straighten, **R** round, **−**/**+** less or more detail, Tab to step through points, arrows to nudge (Shift for
 1 mm), Cmd/Ctrl+Z to undo. An edit that would make the outline cross itself is undone when let go. The edited outline is
 used for the pocket and the exports, saved with the layout, and undone with Cmd/Ctrl+Z; **Reset to trace** goes
-back to the traced one (and lets Symmetric tool apply again).
+back to the traced one. With **Symmetric tool** on, the outline is edited as a mirrored pair about the part's
+axis (drawn dashed): edit either side and the other follows, and the two points on the axis slide along it. An
+outline edited with Symmetric off no longer takes Symmetric until it is reset.
 
 ## What you can tune
 

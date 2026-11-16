@@ -54,6 +54,8 @@ export interface Placement extends PartSettings {
   hidden?: boolean;
   /** The part's outline as edited (part frame, mm); it replaces the traced one (and its symmetric version). */
   path?: BezierPath;
+  /** Whether `path` was edited as a mirrored pair about the part's axis (so Symmetric still applies to it). */
+  pathSym?: boolean;
 }
 
 export interface Layout {
@@ -126,7 +128,7 @@ export function clampPlacement(pl: Placement, params: Params): Placement {
     // a placement without slotTip or slotFlip (made before they existed) has the slot across, whatever the inspector shows
     ...settingsFromParams({ ...c, slotTip: !!pl.slotTip, slotFlip: !!pl.slotFlip }),
     ...(pl.hidden ? { hidden: true } : {}),
-    ...(cleanPath(pl.path) ? { path: cleanPath(pl.path)! } : {}),
+    ...(cleanPath(pl.path) ? { path: cleanPath(pl.path)!, ...(pl.pathSym ? { pathSym: true } : {}) } : {}),
   };
 }
 

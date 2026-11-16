@@ -80,11 +80,12 @@ function partTrace(m: ManifoldToplevel, fillet: number, { part, placement, tool,
     edited,
     sheetTool: affine(tool, up2sheet),
     sheetPocket: affine(pocket, up2sheet),
-    ...(placement.sym && !edited
+    ...(placement.sym && (!edited || placement.pathSym)
       ? { sheetAxis: affine(axisSegment(P0, { deg: sy.axisDeg, offset: sy.offset, centre: sy.centre }), up2sheet) as [Vec2, Vec2] }
       : {}),
     symmetryScore: sy.score,
     axisDeg: axisAngle(part),
+    mirror: { deg: sy.axisDeg, offset: sy.offset, centre: sy.centre },
     measure: measure(tool, pocket, up2sheet),
     grown: grownRing(m, pocket, fillet),
   };

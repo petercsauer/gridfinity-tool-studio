@@ -1075,3 +1075,41 @@ test('a pane picked before the tool\'s outline comes back stays picked', async (
   await expect(page.locator('#tabLayout')).toHaveAttribute('aria-selected', 'true');
   expect(errors).toEqual([]);
 });
+
+test('outline: a symmetric part is edited as a mirrored pair', async ({ page }) => {
+  const errors = pageErrors(page);
+  await recordOutlines(page);
+  await open(page);
+  await page.locator('#tool').selectOption('studfinder');
+  await expect(page.locator('#sym')).toBeChecked();
+  await page.locator('#tabOutline').click();
+  await expect(page.locator('#outlineCanvas')).toHaveAttribute('data-mirrored', 'true');
+  const n = await pointCount(page);
+  expect(n % 2).toBe(0);
+  // drag point 3 by 3 mm: its mirror image (point n - 3) moves by as much
+  const s = Number(await page.locator('#outlineCanvas').getAttribute('data-scale'));
+  const before = await outlinePoints(page);
+  await page.mouse.move(before[3]!.x, before[3]!.y);
+  await page.mouse.down();
+  await page.mouse.move(before[3]!.x + 3 * s, before[3]!.y + 1 * s, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await sentPlacement(page) as { pathSym?: boolean } | undefined)?.pathSym).toBe(true);
+  const after = await outlinePoints(page);
+  await page.mouse.click(after[3]!.x, after[3]!.y);
+  await page.screenshot({ path: test.info().outputPath('outline-mirrored.png') });
+  const moved = (k: number) => Math.hypot(after[k]!.x - before[k]!.x, after[k]!.y - before[k]!.y) / s;
+  expect(moved(3)).toBeGreaterThan(2.5);
+  expect(Math.abs(moved(n - 3) - moved(3))).toBeLessThan(0.2);
+  expect(moved(5)).toBeLessThan(0.05);
+  // still symmetric: Symmetric stays on and can be turned off
+  await expect(page.locator('#sym')).toBeEnabled();
+  // with Symmetric off it is edited as a whole, and then Symmetric no longer applies to it
+  await page.locator('#sym').uncheck();
+  await expect(page.locator('#outlineCanvas')).toHaveAttribute('data-mirrored', 'false');
+  const pts = await outlinePoints(page);
+  await page.mouse.click(pts[3]!.x, pts[3]!.y);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await sentPlacement(page) as { pathSym?: boolean } | undefined)?.pathSym ?? false).toBe(false);
+  await expect(page.locator('#sym')).toBeDisabled();
+  expect(errors).toEqual([]);
+});

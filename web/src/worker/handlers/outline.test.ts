@@ -346,6 +346,11 @@ describe('edited outlines', () => {
     const bad = await outline(params, deps, { placements: [{ ...pl, path: crossed }] });
     expect(bad.parts[0]!.edited).toBe(false);
     expect(bad.parts[0]!.pocket).toEqual(r0.parts[0]!.pocket);
+    // a mirrored edit of a symmetric part keeps its axis on the trace (and its flag through the clamp)
+    const symR = await outline({ ...params, sym: true }, deps, { placements: [{ ...pl, sym: true, path: pulled, pathSym: true }] });
+    expect(symR.parts[0]!.sheetAxis).toBeDefined();
+    expect(symR.layout.placements[0]!.pathSym).toBe(true);
+    expect(symR.parts[0]!.mirror.centre).toHaveLength(2);
     // junk is dropped by the clamp
     const junk = await outline(params, deps, { placements: [{ ...pl, path: { anchors: [{ p: [Number.NaN, 0] }] } as never }] });
     expect(junk.layout.placements[0]!.path).toBeUndefined();

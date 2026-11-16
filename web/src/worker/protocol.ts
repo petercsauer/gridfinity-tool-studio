@@ -33,6 +33,9 @@ export interface PartTrace {
    * from the part frame's y axis). */
   symmetryScore: number;
   axisDeg: number;
+  /** The part's mirror axis (part frame), whatever its score: through `centre` shifted sideways by `offset`, at
+   * `deg` from the y axis. The Outline pane edits a symmetric part as a mirrored pair about it. */
+  mirror: { deg: number; offset: number; centre: Vec2 };
   measure: Measurements;
   /** The pocket grown by half the least gap between two pockets and simplified (part frame), for the live
    * too-close check while a part is dragged: two parts are too close when these meet. */
